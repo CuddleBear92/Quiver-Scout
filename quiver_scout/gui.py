@@ -33,6 +33,7 @@ COL = {
     "runs_on": ("Runs on", 150, ""),
     "added": ("Listed since", 115, "date"),
     "first_seen": ("First seen", 115, "date"),
+    "same_app": ("App in Quiver", 120, ""),
     "same_game": ("Game in Quiver", 120, ""),
     "reason": ("Waiting for", 200, ""),
     "note": ("Note", 220, ""),
@@ -49,11 +50,11 @@ COL = {
 
 TABS = {
     "missing": ("Missing", ["title", "game", "platform", "method", "sources", "released", "version", "pushed", "added",
-                            "first_seen", "runs_on", "same_game", "link", "checked", "url"]),
+                            "first_seen", "runs_on", "same_app", "same_game", "link", "checked", "url"]),
     "other": ("Other sites", ["title", "game", "host", "sources", "released", "added", "first_seen", "runs_on", "link",
                               "checked", "url"]),
     "taken": ("Taken down", ["title", "game", "link", "checked", "replacement", "sources", "released", "pushed", "added",
-                             "same_game", "url"]),
+                             "same_app", "same_game", "url"]),
     "waiting": ("Waiting", ["title", "game", "reason", "note", "released", "version", "sources", "since", "by", "state",
                             "runs_on", "link", "checked", "url"]),
     "blacklist": ("Blacklist", ["title", "game", "note", "since", "by", "state", "link", "checked", "url"]),
@@ -72,7 +73,8 @@ NOISY = re.compile(r"(pages|records) \d+/\d+|\(\d+\)$")
 QUIVER_TABS = ("quiver", "qdown")
 
 # Hidden until shown from a heading's right-click menu.
-DEFAULT_HIDDEN = {"missing": ["pushed", "first_seen", "checked"], "other": ["checked"], "waiting": ["by", "runs_on", "checked"],
+DEFAULT_HIDDEN = {"missing": ["pushed", "first_seen", "checked", "same_game"], "other": ["checked"],
+                  "taken": ["same_game"], "waiting": ["by", "runs_on", "checked"],
                   "blacklist": ["by", "checked"], "quiver": ["checked"]}
 
 
@@ -116,6 +118,17 @@ def on_screen(root: tk.Misc, geometry: str) -> bool:
     x, y = int(m.group(3)), int(m.group(4))
     left, top, right, bottom = screen_box(root)
     return left - 50 <= x <= right - 150 and top - 10 <= y <= bottom - 80
+
+
+def same_app_text(c: Candidate) -> str:
+    """App in Quiver: "same owner" when a Quiver app of that name is the same account's (likely the same app moved
+    or renamed), else "same name" (a fork, or another project called the same), with how many."""
+    if not c.same_app:
+        return ""
+    owner = c.key.split("/")[1].lower() if c.key.count("/") >= 2 else ""
+    same_owner = any(q.key.count("/") >= 2 and q.key.split("/")[1].lower() == owner for q in c.same_app)
+    text = "same owner" if same_owner else "same name"
+    return text + (f" ({len(c.same_app)})" if len(c.same_app) > 1 else "")
 
 
 def link_values(link: dict | None) -> dict:
@@ -564,7 +577,7 @@ class App:
         ttk.Separator(filters, orient="vertical").pack(side="left", fill="y", padx=10)
         self.new_only = self._check(filters, "New")
         self.has_release = self._check(filters, "Has a release")
-        self.hide_same_game = self._check(filters, "Hide games in Quiver")
+        self.hide_same_app = self._check(filters, "Hide apps in Quiver")
         self.multi_only = self._check(filters, "2+ sites")
 
         # The bottom is packed before the lists so it keeps its size and the lists take what's left.
@@ -830,7 +843,7 @@ class App:
                     continue
                 if self.has_release.get() and not c.released:
                     continue
-                if self.hide_same_game.get() and c.same_game:
+                if self.hide_same_app.get() and c.same_app:
                     continue
                 if self.multi_only.get() and len(c.sources) < 2:
                     continue
@@ -856,6 +869,7 @@ class App:
             "sources": ", ".join(EXTERNAL[s] for s in c.sources), "host": c.host, "released": c.released,
             "version": c.version, "pushed": c.pushed, "added": c.added, "runs_on": c.runs_on,
             "first_seen": "" if c.first_seen == "initial" else c.first_seen,
+            "same_app": same_app_text(c),
             "same_game": f"yes ({len(c.same_game)})" if c.same_game else "",
             "reason": WAIT_REASONS.get(d.get("reason", ""), d.get("reason", "")), "note": d.get("note", ""),
             "since": d.get("date", ""), "by": d.get("by", ""), "state": state, "url": c.url,
@@ -987,7 +1001,7 @@ class App:
         if self.current() in QUIVER_TABS:
             apps = [self.quiver_rows[i] for i in self.tables[self.current()].selection() if i in self.quiver_rows]
         else:
-            apps = [q for c in self.selected_candidates() for q in (c.in_quiver or c.same_game)]
+            apps = [q for c in self.selected_candidates() for q in (c.in_quiver or c.same_app or c.same_game)]
         seen, out = set(), []
         for q in apps:
             if q.page and q.page not in seen:
@@ -1133,9 +1147,11 @@ class App:
             if cur in ("waiting", "blacklist"):
                 m.add_command(label="Back to the list", command=self.undecide_selected)
             cands = self.selected_candidates()
-            if len(cands) == 1 and cands[0].same_game:
+            if len(cands) == 1 and (cands[0].same_app or cands[0].same_game):
                 m.add_separator()
-                for q in cands[0].same_game[:8]:
+                for q in cands[0].same_app[:8]:
+                    m.add_command(label=f"Quiver may have this app as: {q.title}", command=lambda u=q.page or q.url: open_url(u))
+                for q in [q for q in cands[0].same_game if q not in cands[0].same_app][:6]:
                     m.add_command(label=f"Quiver has the same game: {q.title}", command=lambda u=q.page or q.url: open_url(u))
         m.tk_popup(event.x_root, event.y_root)
 
@@ -1318,11 +1334,18 @@ class App:
                 self._link(q.title, q.page or q.url)
                 d.insert("end", "   ")
             d.insert("end", "(you can take it off this list)", "flag")
-        elif c.same_game:
-            self._line("Quiver has this game from")
-            for q in c.same_game[:6]:
-                self._link(q.title, q.page or q.url)
-                d.insert("end", "   ")
+        else:
+            if c.same_app:
+                self._line("Quiver may have this app as")
+                for q in c.same_app[:6]:
+                    self._link(q.title, q.page or q.url)
+                    d.insert("end", f" ({q.url.split('://', 1)[-1]})   ", "label")
+            others = [q for q in c.same_game if q not in c.same_app]
+            if others:
+                self._line("Other Quiver apps for this game")
+                for q in others[:6]:
+                    self._link(q.title, q.page or q.url)
+                    d.insert("end", "   ")
         self._link_line(c.link)
         dec = c.decision
         if dec:

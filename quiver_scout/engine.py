@@ -25,6 +25,23 @@ FORGE_PROVIDERS = {"github", "gitlab", "gitea"}
 
 ORDER = ["quiver", *EXTERNAL]
 
+# Project and repository names too common to say two projects are the same app.
+GENERIC_NAMES = {"recomp", "decomp", "port", "pcport", "game", "games", "src", "source", "code", "main", "master",
+                 "recompiled", "decompiled", "decompilation", "recompilation", "remake", "native", "pc", "android",
+                 "nativeport", "staticrecomp", "project", "release", "releases", "build", "engine", "client"}
+
+
+def app_names(title: str, key: str) -> set[str]:
+    """The names an app goes by, to tell the same app under another link: its project name and its repository's
+    name, lowercase letters and digits only ("Zelda 64: Recompiled" and Zelda64Recomp). Names too short or too
+    common to tell apps apart are left out."""
+    out = set()
+    for name in (title, key.rstrip("/").rsplit("/", 1)[-1] if key.count("/") >= 2 else ""):
+        n = normalize_title(name)
+        if len(n) >= 5 and n not in GENERIC_NAMES:
+            out.add(n)
+    return out
+
 
 def _fetch_one(store: Store, name: str, ctx: Context) -> list[Item]:
     s = store.settings
@@ -335,6 +352,7 @@ class Candidate:
     pages: dict[str, str] = field(default_factory=dict)
     listings: dict[str, Item] = field(default_factory=dict)  # each site's own item
     in_quiver: list[Item] = field(default_factory=list)  # Quiver apps with this repository
+    same_app: list[Item] = field(default_factory=list)  # Quiver apps with its name, under another link (app_names)
     same_game: list[Item] = field(default_factory=list)  # Quiver apps for the same game, from another repository
     decision: dict | None = None
     supported_host: bool = True
@@ -445,9 +463,12 @@ def compare(store: Store) -> Comparison:
 
     by_key: dict[str, list[Item]] = {}
     by_game: dict[str, list[Item]] = {}
+    by_app: dict[str, list[Item]] = {}
     for q in quiver_items:
         for k in aliases(q.key):
             by_key.setdefault(k, []).append(q)
+        for n in app_names(q.title, q.key):
+            by_app.setdefault(n, []).append(q)
         for g in q.game.split("; "):
             if normalize_title(g):
                 by_game.setdefault(normalize_title(g), []).append(q)
@@ -491,6 +512,11 @@ def compare(store: Store) -> Comparison:
             names_ |= aliases(moved[0])
         c.in_quiver = list({id(q): q for k in names_ for q in by_key.get(k, [])}.values())
         if not c.in_quiver:
+            # The same app under another link (a fork, a mirror, a re-upload): by every name the sites give it.
+            called = app_names(c.title, c.key)
+            for listing in c.listings.values():
+                called |= app_names(listing.title, listing.key)
+            c.same_app = list({id(q): q for n in called for q in by_app.get(n, [])}.values())
             c.same_game = by_game.get(normalize_title(c.game), [])
         c.decision = store.decisions.get(c.key)
         c.supported_host = c.host in hosts
@@ -555,7 +581,7 @@ QUIVER_COLUMNS = ["title", "game", "url", "provider", "slug", "developer", "type
                   "version", "quiver_page", "link", "link_checked", "moved_to"]
 CANDIDATE_COLUMNS = ["title", "game", "url", "host", "sources", "method", "platform", "author", "listed_since",
                      "latest_release", "version", "last_push", "first_seen", "status", "waiting_for", "note",
-                     "quiver_apps_for_same_game", "link", "link_checked", "moved_to", *[f"{s}_page" for s in EXTERNAL]]
+                     "quiver_apps_with_same_name", "quiver_apps_for_same_game", "link", "link_checked", "moved_to", *[f"{s}_page" for s in EXTERNAL]]
 
 
 def write_quiver_csv(path: str, quiver_items: list[Item], links: dict | None = None) -> int:
@@ -590,7 +616,8 @@ def write_candidates_csv(path: str, candidates: list[Candidate]) -> int:
                 c.title, c.game, c.url, c.host, ", ".join(EXTERNAL[s] for s in c.sources), c.method, c.platform,
                 c.author, c.added, c.released, c.version, c.pushed, "" if c.first_seen == "initial" else c.first_seen,
                 status_of(c), WAIT_REASONS.get(d.get("reason", ""), "") if d.get("list") == WAITING else "",
-                d.get("note", ""), "; ".join(q.title for q in c.same_game), c.link_status,
+                d.get("note", ""), "; ".join(q.title for q in c.same_app), "; ".join(q.title for q in c.same_game),
+                c.link_status,
                 (c.link or {}).get("checked", ""), (c.link or {}).get("moved_to", ""), *[c.pages.get(s, "") for s in EXTERNAL],
             ])
     return len(candidates)
