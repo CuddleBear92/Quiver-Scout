@@ -318,7 +318,9 @@ it to `EXTERNAL` in `sources/__init__.py` and to `_fetch_one` in `engine.py`.
 Run workflow**): it runs the tests on Linux, builds `QuiverScout.exe` with PyInstaller on Windows, and publishes it as
 a release tagged `build-N`, N being the run number, one higher every time. The build number is stamped into the exe
 (`quiver_scout/_build.py`, which is 0 in the source), and that's what the app compares to tell when there's a newer
-one. The release notes are the merged branch's commit message. Changes to Markdown files and `docs/` alone don't
+one; builds are just numbered, Build 1, Build 2, and so on. The release notes are the merged branch's commit
+message. The exe gets the arrowhead icon in `quiver_scout/assets` (drawn by `tools/make_icon.py`, which needs
+Pillow; the app doesn't). Changes to Markdown files and `docs/` alone don't
 make a release.
 
 ## Tests

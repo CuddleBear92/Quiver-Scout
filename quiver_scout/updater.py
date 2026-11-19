@@ -23,8 +23,6 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import __version__
-
 REPO = "CuddleBear92/quiver-scout"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases"
@@ -46,8 +44,9 @@ def current_build() -> int:
 
 
 def version_text() -> str:
+    """"Build 7", or "running from source"."""
     build = current_build()
-    return f"build {build} (v{__version__})" if build else f"v{__version__} (from source)"
+    return f"Build {build}" if build else "running from source"
 
 
 def frozen() -> bool:
