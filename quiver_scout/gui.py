@@ -151,6 +151,9 @@ class Table(ttk.Frame):
         self.tree.tag_configure("dim", foreground=c["dim"])
         self.tree.tag_configure("flag", foreground=c["good"])
         self.tree.tag_configure("warn", foreground=c["error"])
+        # Rows alternate between two shades, so a long row is easy to follow across.
+        self.tree.tag_configure("even", background=c["surface"])
+        self.tree.tag_configure("odd", background=c["stripe"])
 
     # ---- which columns, in what order ----------------------------------------------------------------------------
 
@@ -299,6 +302,8 @@ class Table(ttk.Frame):
         self.default_order = [r[0] for r in rows]
         if self.sort_col:
             self._sort()
+        else:
+            self._stripe()
         keep = [i for i in selected if self.tree.exists(i)]
         if keep:
             self.tree.selection_set(keep)
@@ -328,6 +333,7 @@ class Table(ttk.Frame):
         self._save("sort", None)
         for n, iid in enumerate(i for i in self.default_order if self.tree.exists(i)):
             self.tree.move(iid, "", n)
+        self._stripe()
         self._headings()
 
     def _sort(self) -> None:
@@ -337,7 +343,14 @@ class Table(ttk.Frame):
         empty = [r for r in rows if not r[0]]
         for n, (_, iid) in enumerate(filled + empty):
             self.tree.move(iid, "", n)
+        self._stripe()
         self._headings()
+
+    def _stripe(self) -> None:
+        """Shade every other row, by where it is now."""
+        for n, iid in enumerate(self.tree.get_children("")):
+            tags = [t for t in self.tree.item(iid, "tags") if t not in ("odd", "even")]
+            self.tree.item(iid, tags=[*tags, "odd" if n % 2 else "even"])
 
     def _headings(self) -> None:
         for cid in self.columns:
@@ -515,12 +528,14 @@ class App:
         actions = ttk.Frame(bottom, padding=(0, 8, 0, 0))
         actions.pack(side="bottom", fill="x")
         self.btn_open = ttk.Button(actions, text="Open repository  ⏎", command=self.open_repo)
-        self.btn_pages = ttk.Button(actions, text="Open listing pages  Ctrl+⏎", command=self.open_pages)
+        self.btn_pages = ttk.Button(actions, text="Listing pages  Ctrl+⏎", command=self.open_pages)
         self.btn_copy = ttk.Button(actions, text="Copy URL  Ctrl+C", command=self.copy_urls)
+        self.btn_quiver = ttk.Button(actions, text="Open in Quiver  Q", command=self.open_quiver)
         self.btn_wait = ttk.Button(actions, text="Wait…  W", command=self.wait_selected)
         self.btn_black = ttk.Button(actions, text="Blacklist…  Del", command=self.blacklist_selected)
-        self.btn_back = ttk.Button(actions, text="Back to the list  Backspace", command=self.undecide_selected)
-        for b in (self.btn_open, self.btn_pages, self.btn_copy, self.btn_wait, self.btn_black, self.btn_back):
+        self.btn_back = ttk.Button(actions, text="Back to list  ⌫", command=self.undecide_selected)
+        for b in (self.btn_open, self.btn_pages, self.btn_quiver, self.btn_copy, self.btn_wait, self.btn_black,
+                  self.btn_back):
             b.pack(side="left", padx=(0, 6))
         self.count = ttk.Label(actions, text="", style="Muted.TLabel")
         self.count.pack(side="right")
@@ -615,6 +630,7 @@ class App:
             t.tree.bind("<Delete>", lambda e: self.delete_key())
             t.tree.bind("<BackSpace>", lambda e: self.undecide_selected())
             t.tree.bind("<KeyPress-w>", lambda e: self.wait_selected())
+            t.tree.bind("<KeyPress-q>", lambda e: self.open_quiver())
             t.tree.bind("<Control-c>", lambda e: self.copy_urls())
             t.tree.bind("<Control-a>", lambda e, t=t: t.tree.selection_set(t.tree.get_children()))
 
@@ -624,6 +640,7 @@ class App:
             "Shift+F5\tFull refresh (read everything again)",
             "Enter / double-click\tOpen repository",
             "Ctrl+Enter\tOpen the listing site pages",
+            "Q\tOpen the Quiver listing (the app, or Quiver's apps for the same game)",
             "Ctrl+C\tCopy URLs of the selected rows",
             "W\tWait for it (on Waiting: change why)",
             "Delete\tBlacklist (on Waiting and Blacklist: back to the list)",
@@ -847,6 +864,7 @@ class App:
                              text="Change why…  W" if cur == "waiting" else "Wait…  W")
         self.btn_black.config(state=on(cur in ("missing", "other", "taken", "waiting")))
         self.btn_back.config(state=on(cur in ("waiting", "blacklist")))
+        self.btn_quiver.config(state=on(bool(self.quiver_pages())))
 
     def open_repo(self) -> None:
         links = self.selected_links()
@@ -854,6 +872,30 @@ class App:
             return
         for url, _ in links:
             open_url(url)
+
+    def quiver_pages(self) -> list[tuple[str, str]]:
+        """(title, Quiver page) for the selection: the Quiver app itself, the app with the same repository, or else
+        Quiver's apps for the same game."""
+        if self.current() == "quiver":
+            apps = [self.quiver_rows[i] for i in self.tables["quiver"].selection() if i in self.quiver_rows]
+        else:
+            apps = [q for c in self.selected_candidates() for q in (c.in_quiver or c.same_game)]
+        seen, out = set(), []
+        for q in apps:
+            if q.page and q.page not in seen:
+                seen.add(q.page)
+                out.append((q.title, q.page))
+        return out
+
+    def open_quiver(self) -> None:
+        pages = self.quiver_pages()
+        if not pages:
+            self.status.config(text="Quiver has no app for the selection, or for its game.", style="TLabel")
+            return
+        if len(pages) > 10 and not messagebox.askyesno("Open links", f"Open {len(pages)} Quiver pages in your browser?"):
+            return
+        for _, page in pages:
+            open_url(page)
 
     def open_pages(self) -> None:
         pages = [p for _, ps in self.selected_links() for p in ps if p]
@@ -949,6 +991,9 @@ class App:
         m = tk.Menu(self.root, tearoff=False)
         m.add_command(label="Open repository", command=self.open_repo)
         m.add_command(label="Open listing pages", command=self.open_pages)
+        quiver = self.quiver_pages()
+        m.add_command(label="Open in Quiver" if len(quiver) <= 1 else f"Open in Quiver ({len(quiver)} apps)",
+                      command=self.open_quiver, state="normal" if quiver else "disabled")
         m.add_command(label="Copy URL", command=self.copy_urls)
         m.add_command(label="Check link now", command=self.check_selected_links,
                       state="disabled" if self.refreshing else "normal")
@@ -971,7 +1016,7 @@ class App:
             if len(cands) == 1 and cands[0].same_game:
                 m.add_separator()
                 for q in cands[0].same_game[:8]:
-                    m.add_command(label=f"Quiver has the same game: {q.title}", command=lambda u=q.url: open_url(u))
+                    m.add_command(label=f"Quiver has the same game: {q.title}", command=lambda u=q.page or q.url: open_url(u))
         m.tk_popup(event.x_root, event.y_root)
 
     def check_selected_links(self) -> None:
@@ -1002,6 +1047,7 @@ class App:
         self.details.insert("end", f"\n{label}  ", "label")
 
     def show_details(self) -> None:
+        self._update_buttons()
         d = self.details
         d.config(state="normal")
         d.delete("1.0", "end")
@@ -1121,7 +1167,7 @@ class App:
         elif c.same_game:
             self._line("Quiver has this game from")
             for q in c.same_game[:6]:
-                self._link(q.title, q.url)
+                self._link(q.title, q.page or q.url)
                 d.insert("end", "   ")
         self._link_line(c.link)
         dec = c.decision
