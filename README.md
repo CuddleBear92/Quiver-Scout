@@ -87,10 +87,10 @@ Columns include **Latest release**, **Version**, **Last push**, **Listed since**
 
 Each tab's column order, hidden columns, widths and sorting are saved in `settings.json`.
 
-*App in Quiver* says Quiver may already have this app under another link: a Quiver app with the same project name
-(as any site names it) or the same repository name, such as a fork, a mirror, or a repository that was renamed or
-moved to another host. **same owner** means that Quiver app is the same account's, so very likely the same app;
-**same name** that it's someone else's, a fork or another project that happens to be called the same. Names too
+*App in Quiver* says Quiver likely already has this app at another link ("likely: owner/repo"): a Quiver app with
+the same project name (as any site names it) or the same repository name, **and** the same creator (the repository
+owner, or the developer a site names). That catches a repository that was renamed or moved to another host. A fork
+has another owner and another developer's project called the same another creator, so neither counts. Names too
 common to tell apps apart (recomp, decomp, pc-port...) don't count. The details pane links to them. *Game in
 Quiver* (hidden at first) is looser: Quiver has some app for the same game.
 
