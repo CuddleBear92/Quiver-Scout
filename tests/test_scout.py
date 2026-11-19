@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from quiver_scout import engine, forges, linkcheck, names, net, replacements
+from quiver_scout import engine, forges, linkcheck, names, net, replacements, updater
 from quiver_scout.takendown import TakenDown
 from quiver_scout.decisions import BLACKLIST, BLACKLIST_REASONS, WAITING, Decisions, reason_label
 from quiver_scout.sources import (Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
@@ -373,6 +373,66 @@ class Replacements(unittest.TestCase):
         with mock.patch.object(replacements, "_json") as j:
             self.assertEqual(replacements._search("github.com", "x", {}), [])
         j.assert_not_called()
+
+
+class Updates(unittest.TestCase):
+    class Resp:
+        def __init__(self, body, headers=None):
+            self.body, self.headers, self.pos = body, headers or {}, 0
+        def read(self, n=-1):
+            if n < 0:
+                n = len(self.body)
+            out, self.pos = self.body[self.pos:self.pos + n], self.pos + n
+            return out
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def release(self, tag="build-7", digest="sha256:abc"):
+        return {"tag_name": tag, "name": "Build 7 (v0.12.1)", "body": "notes", "html_url": "https://x/r",
+                "assets": [{"name": "QuiverScout.exe", "browser_download_url": "https://x/exe", "size": 4, "digest": digest}]}
+
+    def test_latest_reads_the_build_number_and_exe(self):
+        with mock.patch("urllib.request.urlopen", return_value=self.Resp(json.dumps(self.release()).encode())):
+            info = updater.latest()
+        self.assertEqual((info["build"], info["url"], info["size"], info["sha256"]), (7, "https://x/exe", 4, "abc"))
+        with mock.patch("urllib.request.urlopen", return_value=self.Resp(json.dumps(self.release("v1.0")).encode())):
+            self.assertIsNone(updater.latest())  # not one of ours
+
+    def test_download_checks_size_and_sha256(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as d:
+            dest = Path(d) / "new.exe"
+            good = {"build": 7, "url": "https://x/exe", "size": 4, "sha256": hashlib.sha256(b"abcd").hexdigest()}
+            with mock.patch("urllib.request.urlopen", return_value=self.Resp(b"abcd")):
+                self.assertEqual(updater.download(good, "", dest).read_bytes(), b"abcd")
+            with mock.patch("urllib.request.urlopen", return_value=self.Resp(b"abce")), self.assertRaises(updater.UpdateError):
+                updater.download(good, "", Path(d) / "bad.exe")
+            self.assertFalse((Path(d) / "bad.exe").exists())
+            with mock.patch("urllib.request.urlopen", return_value=self.Resp(b"abc")), self.assertRaises(updater.UpdateError):
+                updater.download({**good, "sha256": ""}, "", Path(d) / "short.exe")
+
+    def test_from_source_it_doesnt_replace_itself(self):
+        self.assertFalse(updater.frozen())
+        self.assertEqual(updater.current_build(), 0)
+        with self.assertRaises(updater.UpdateError):
+            updater.install(Path("anything.exe"))
+
+
+    def test_install_swaps_the_exe_and_starts_the_new_one(self):
+        with tempfile.TemporaryDirectory() as d:
+            exe, new = Path(d) / "QuiverScout.exe", Path(d) / "download" / "new.exe"
+            new.parent.mkdir()
+            exe.write_bytes(b"old build")
+            new.write_bytes(b"new build")
+            with mock.patch.object(updater.sys, "frozen", True, create=True), \
+                    mock.patch.object(updater.sys, "executable", str(exe)), \
+                    mock.patch.object(updater.subprocess, "Popen") as popen:
+                updater.install(new)
+                self.assertEqual(exe.read_bytes(), b"new build")
+                self.assertEqual((Path(d) / "QuiverScout.exe.old").read_bytes(), b"old build")
+                self.assertEqual(popen.call_args.args[0], [str(exe)])
+                updater.cleanup()
+            self.assertFalse((Path(d) / "QuiverScout.exe.old").exists())
 
 
 class ConditionalDownloads(unittest.TestCase):

@@ -1,3 +1,3 @@
 """Quiver Scout: find recompilations and ports that the Quiver Launcher catalog doesn't list yet."""
 
-__version__ = "0.12.1"
+__version__ = "0.13.0"

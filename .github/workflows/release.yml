@@ -1,0 +1,66 @@
+# Builds QuiverScout.exe and publishes it as a release, every time main changes (and from the Actions tab).
+#
+# Releases are tagged build-1, build-2, ...: the run number, one higher every run. The app compares that number with
+# its own (stamped into quiver_scout/_build.py here) to tell when there's a newer build.
+
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # to create the release
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test
+        run: python -m unittest discover -s tests
+
+  build:
+    needs: test  # no release when a test fails
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # the merge commit and what it merged, for the release notes
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Stamp the build number
+        shell: bash
+        run: |
+          printf '# Stamped by the release workflow.\nBUILD = %s\n' "${{ github.run_number }}" > quiver_scout/_build.py
+
+      - name: Build QuiverScout.exe
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check pyinstaller==6.11.1
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name QuiverScout "Quiver Scout.pyw"
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python -c "import quiver_scout; print(quiver_scout.__version__)")
+          # A merged pull request's notes are its branch's commit message, not "Merge pull request #N".
+          if git rev-parse -q --verify HEAD^2 >/dev/null; then git log -1 --format=%B HEAD^2; else git log -1 --format=%B; fi > notes.txt
+          gh release create "build-${{ github.run_number }}" dist/QuiverScout.exe \
+            --title "Build ${{ github.run_number }} (v$version)" \
+            --notes-file notes.txt \
+            --target "${{ github.sha }}"

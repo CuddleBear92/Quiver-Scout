@@ -12,7 +12,7 @@ import tkinter as tk
 import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
-from . import __version__, engine, theme
+from . import __version__, engine, theme, updater
 from .decisions import BLACKLIST, BLACKLIST_REASONS, WAIT_REASONS, WAITING, reason_label
 from .engine import Candidate, Comparison
 from .sources import EXTERNAL, Item
@@ -67,7 +67,7 @@ TABS = {
 NOT_KNOWN = "Not known"
 
 # Progress messages that only count up, shown in the status line but not kept in the log.
-NOISY = re.compile(r"(pages|records) \d+/\d+|\(\d+\)$")
+NOISY = re.compile(r"(pages|records) \d+/\d+|\(\d+\)$|^Downloading build")
 
 # Tabs whose rows are Quiver's own apps.
 QUIVER_TABS = ("quiver", "qdown")
@@ -481,6 +481,10 @@ class App:
         if not self.store.meta("refresh"):
             self.log("No data yet. Press Refresh (F5) to read Quiver and the listing sites.")
         root.bind("<FocusIn>", self._focus)
+        updater.cleanup()  # the exe an update left behind
+        self.update_info: dict | None = None
+        if self.store.settings.get("check_updates", True):
+            root.after(3000, lambda: self.check_updates(quiet=True))
 
     # ---- layout --------------------------------------------------------------------------------------------------
 
@@ -513,9 +517,10 @@ class App:
         v.add_separator()
         v.add_command(label="Choose columns: right-click a column heading", state="disabled")
         h = tk.Menu(self.root, tearoff=False)
+        h.add_command(label="Check for updates…", command=lambda: self.check_updates(quiet=False))
         h.add_command(label="Keyboard shortcuts", command=self.shortcuts)
         h.add_command(label="About", command=lambda: messagebox.showinfo(
-            "Quiver Scout", f"Quiver Scout {__version__}\n\nFinds recomps and ports listed on other sites that "
+            "Quiver Scout", f"Quiver Scout {updater.version_text()}\n\nFinds recomps and ports listed on other sites that "
             "Quiver Launcher doesn't have yet.\n\nData folder:\n" + str(self.store.dir)
             + "\n\nDecisions file:\n" + str(self.store.decisions.path)))
         self.menus = [("File", f), ("View", v), ("Help", h)]
@@ -1440,8 +1445,13 @@ class App:
                     self.progress.config(mode="determinate", value=0)
                     if kind == "failed":
                         self.log("ERROR " + a, error=True)
-                        self.status.config(text=f"{'Refresh' if self.job == 'refresh' else 'Link check'} failed: {a}",
-                                           style="Error.TLabel")
+                        what = {"refresh": "Refresh", "update": "Update"}.get(self.job, "Link check")
+                        self.status.config(text=f"{what} failed: {a}", style="Error.TLabel")
+                        if self.job == "update":
+                            messagebox.showerror("Update", f"The update failed:\n\n{a}", parent=self.root)
+                        return
+                    if self.job == "update":
+                        self._install_update(a)
                         return
                     self.reload()
                     if self.job == "links":
@@ -1510,6 +1520,68 @@ class App:
         if path and self.result:
             n = engine.write_quiver_csv(path, self.result.quiver, self.result.links)
             self.status.config(text=f"Wrote {n} rows to {path}", style="TLabel")
+
+    # ---- updates -------------------------------------------------------------------------------------------------
+
+    def check_updates(self, quiet: bool = True) -> None:
+        """Look for a newer build on Releases in the background. `quiet`: on start, say nothing unless there's one."""
+        token = self.store.tokens().get("github", "")
+
+        def work():
+            try:
+                info = updater.latest(token)
+                self.root.after(0, lambda: self._update_found(info, quiet))
+            except updater.UpdateError as e:
+                if not quiet:
+                    self.root.after(0, lambda: messagebox.showwarning("Updates", str(e), parent=self.root))
+            except Exception as e:  # noqa: BLE001
+                if not quiet:
+                    self.root.after(0, lambda: messagebox.showwarning("Updates", f"Couldn't check: {e}", parent=self.root))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _update_found(self, info: dict | None, quiet: bool) -> None:
+        mine = updater.current_build()
+        if not info or info["build"] <= mine:
+            if not quiet:
+                messagebox.showinfo("Updates", f"You have the newest build: {updater.version_text()}.", parent=self.root)
+            return
+        self.update_info = info
+        self.status.config(text=f"{info['title']} is available: Help → Check for updates.", style="TLabel")
+        if quiet and self.store.settings.get("skip_build") == info["build"]:
+            return
+        notes = info["notes"].strip()
+        notes = (notes[:700] + "…") if len(notes) > 700 else notes
+        if not updater.frozen():
+            if messagebox.askyesno("Update available", f"{info['title']} is available; this copy runs from source "
+                                   f"({updater.version_text()}).\n\n{notes}\n\nOpen the release page?", parent=self.root):
+                open_url(info["page"])
+            return
+        if messagebox.askyesno("Update available", f"{info['title']} is available (you have build {mine}).\n\n{notes}"
+                               "\n\nDownload it and restart Quiver Scout now?", parent=self.root):
+            self.download_update(info)
+        else:
+            self.store.settings["skip_build"] = info["build"]  # not asked again until a newer one
+            self.store.save_settings()
+
+    def download_update(self, info: dict) -> None:
+        if self.refreshing:
+            messagebox.showinfo("Update", "Wait for the refresh or link check to finish, then update.", parent=self.root)
+            return
+        import tempfile
+        from pathlib import Path
+        token = self.store.tokens().get("github", "")
+        dest = Path(tempfile.gettempdir()) / f"QuiverScout-build-{info['build']}.exe"
+        self.log(f"--- Downloading {info['title']}")
+        self._start("update", "Downloading the update…", lambda say: updater.download(info, token, dest, say))
+
+    def _install_update(self, new_exe) -> None:
+        try:
+            updater.install(new_exe)
+        except Exception as e:  # noqa: BLE001
+            messagebox.showerror("Update", f"Couldn't put the new build in place:\n\n{e}", parent=self.root)
+            return
+        self.quit()
 
     def import_shared(self) -> None:
         """Merge a decisions file or taken-down list someone sent into this computer's."""
@@ -1651,12 +1723,16 @@ class App:
             ttk.Button(keys, text="Test", command=lambda st=site, v=var, lab=result: self._test_token(st, v.get(), lab)
                        ).grid(row=r, column=3, padx=(4, 0))
             r += 2
+        updates_on = tk.BooleanVar(value=bool(s.get("check_updates", True)))
+        ttk.Checkbutton(keys, text="Check for a newer build when Quiver Scout starts",
+                        variable=updates_on).grid(row=r, column=0, columnspan=4, sticky="w", pady=(10, 0))
 
         def save():
             s["sources"] = {k: v.get() for k, v in src.items()}
             s["unbaked_full_scan"] = full.get()
             s["include_clones"] = clones.get()
             s["check_links"] = links_on.get()
+            s["check_updates"] = updates_on.get()
             s["quiver_csv"] = csv_var.get().strip()
             s["decisions_path"] = dec_var.get().strip()
             s["taken_down_path"] = down_var.get().strip()
