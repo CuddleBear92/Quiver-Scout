@@ -20,7 +20,11 @@ from pathlib import Path
 from .decisions import Decisions
 
 DEFAULT_SETTINGS = {
-    "sources": {"recomplauncher": True, "decompbuddy": True, "unbaked": True, "playported": True},
+    "sources": {"recomplauncher": True, "decompbuddy": True, "unbaked": True, "playported": True,
+                "osgameclones": True, "clonedgames": True, "trilarion": True},
+    # Clones are new games in the style of an old one (OSGameClones, Cloned Games and OSGL list many); Quiver
+    # can't offer them for the original, so they're left out unless this is on.
+    "include_clones": False,
     # Read every unbaked game record (thousands of requests the first time) instead of only recent additions.
     "unbaked_full_scan": False,
     # A CSV of Quiver's catalog to use instead of its API. Empty: use the API.

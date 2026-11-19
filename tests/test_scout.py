@@ -5,9 +5,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from quiver_scout import engine, net
+from quiver_scout import engine, names, net
 from quiver_scout.decisions import BLACKLIST, WAITING, Decisions
-from quiver_scout.sources import Context, Item, decompbuddy, playported, quiver, recomplauncher, unbaked
+from quiver_scout.sources import (Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
+                                  recomplauncher, trilarion, unbaked)
 from quiver_scout.sources.base import day
 from quiver_scout.store import Store
 from quiver_scout.urls import aliases, canonical, from_provider, normalize_title
@@ -156,6 +157,63 @@ class Sources(unittest.TestCase):
         self.assertEqual(len(calls), 1)  # every app known: only /release-status
 
 
+class Names(unittest.TestCase):
+    def test_platforms_share_one_name(self):
+        for forms, name in [
+            (["ps2", "PS2", "PlayStation 2"], "PlayStation 2"),
+            (["gba", "GBA", "Game Boy Advance"], "Game Boy Advance"),
+            (["x360", "Xbox 360"], "Xbox 360"),
+            (["og xbox", "xbox", "Xbox"], "Xbox"),
+            (["n64", "N64", "Nintendo 64"], "Nintendo 64"),
+            (["pc", "PC (Windows)", "windows"], "PC"),
+            (["gen", "Genesis", "Mega Drive"], "Genesis / Mega Drive"),
+        ]:
+            self.assertEqual({names.platform(f) for f in forms}, {name}, forms)
+
+    def test_lists_are_normalized_and_deduplicated(self):
+        self.assertEqual(names.platform("ps1, PlayStation, n64"), "PlayStation, Nintendo 64")
+        self.assertEqual(names.platform("ngp"), "NGP")  # unknown short names read as abbreviations
+        self.assertEqual(names.platform("Acorn 32-bit"), "Acorn 32-bit")
+
+    def test_methods(self):
+        self.assertEqual(names.method("port"), "Port")
+        self.assertEqual(names.method("Recompilation"), "Recomp")
+        self.assertEqual(names.method("Static recomp"), "Static recomp")
+        self.assertEqual(names.method("Matching decomp"), "Matching decomp")
+
+
+class CloneSites(unittest.TestCase):
+    def test_osgameclones(self):
+        items = osgameclones.parse((FIX / "osgameclones.html").read_text())
+        nes = items[0]
+        self.assertEqual((nes.title, nes.game, nes.method), ("MetroidNESRecomp", "Metroid", "Remake"))
+        self.assertEqual((nes.url, nes.page), ("https://github.com/mstan/MetroidNESRecomp", "https://osgameclones.com/metroid"))
+        self.assertEqual(names.platform(nes.platform), "Arcade, Game Boy, NES")
+        clone = items[-1]
+        self.assertEqual((clone.method, clone.extra), ("Clone", {"clone": True}))
+
+    def test_clonedgames(self):
+        dec = clonedgames.parse_page("https://clonedgames.com/redriver2", (FIX / "clonedgames_redriver2.html").read_text())
+        self.assertEqual((dec["title"], dec["game"], dec["url"], dec["method"], dec["clone"]),
+                         ("REDRIVER2", "Driver 2", "https://github.com/OpenDriver2/REDRIVER2", "Decomp", False))
+        port = clonedgames.parse_page("https://clonedgames.com/eduke32", (FIX / "clonedgames_eduke32.html").read_text())
+        self.assertEqual((port["game"], port["clone"]), ("Duke Nukem 3D", True))
+        self.assertIsNone(clonedgames.parse_page("https://clonedgames.com/x", "<html>no project</html>"))
+
+    def test_clonedgames_sitemap_skips_sections(self):
+        xml = "".join(f"<url><loc>https://clonedgames.com/{p}</loc><lastmod>2026</lastmod></url>"
+                      for p in ("redriver2", "originals/doom", "decompilations/n64", "blog", "contact"))
+        self.assertEqual(list(clonedgames.parse_sitemap(xml)), ["https://clonedgames.com/redriver2"])
+
+    def test_trilarion(self):
+        items = trilarion.parse_letter("D", (FIX / "trilarion_D.html").read_text())
+        d2x, dfu = items
+        self.assertEqual((d2x.game, d2x.url), ("Descent; Descent II", "https://svn.code.sf.net/p/d2x-xl/code"))
+        self.assertEqual((dfu.url, dfu.page), ("https://github.com/Interkarma/daggerfall-unity",
+                                               "https://trilarion.github.io/opensourcegames/games/D.html#daggerfall_unity"))
+        self.assertEqual((dfu.platform, dfu.extra["runs_on"]), ("", "Windows, Linux, macOS"))
+
+
 class ConditionalDownloads(unittest.TestCase):
     def test_304_reuses_the_saved_body(self):
         with tempfile.TemporaryDirectory() as d:
@@ -267,7 +325,7 @@ class Compare(unittest.TestCase):
 
     def test_refresh_keeps_last_items_of_a_failing_source(self):
         self.put([Item("playported", "https://github.com/x/y", "Y")])
-        self.store.settings["sources"] = {"recomplauncher": False, "decompbuddy": False, "unbaked": False, "playported": True}
+        self.store.settings["sources"] = {s: s == "playported" for s in self.store.settings["sources"]}
 
         def fake(store, name, ctx):
             if name == "quiver":
@@ -279,6 +337,20 @@ class Compare(unittest.TestCase):
         self.assertEqual(result["errors"], ["playported: site down"])
         self.assertEqual({i["source"] for i in self.store.items()}, {"quiver", "playported"})
         self.assertEqual(self.store.seen(), {"github.com/x/y": "initial"})
+
+    def test_names_and_dates_are_tidied(self):
+        self.put([Item("playported", "https://github.com/x/y", "Y", platform="ps2", method="recomp",
+                       added="2026-11-07T22:02:09")])
+        c = engine.compare(self.store).missing[0]
+        self.assertEqual((c.platform, c.method, c.added), ("PlayStation 2", "Recomp", "2026-11-07"))
+
+    def test_clones_are_left_out_unless_asked_for(self):
+        self.put([Item("osgameclones", "https://github.com/c/clone", "C", extra={"clone": True}),
+                  Item("osgameclones", "https://github.com/r/remake", "R")])
+        self.assertEqual([c.title for c in engine.compare(self.store).missing], ["R"])
+        self.store.settings["include_clones"] = True
+        self.assertEqual(sorted(c.title for c in engine.compare(self.store).missing), ["C", "R"])
+
 
     def test_csv_exports(self):
         self.put([Item("quiver", "https://github.com/a/b", "AB", game="G", slug="ab", released="2026-01-02"),
