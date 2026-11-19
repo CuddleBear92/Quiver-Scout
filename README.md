@@ -68,8 +68,9 @@ pip install .
 
 | Tab | What's in it |
 | --- | --- |
-| **Missing** | Projects other sites list that Quiver doesn't, on a code host Quiver reads releases from: GitHub, GitLab, Codeberg, Bitbucket, and self-hosted Forgejo/Gitea servers (see below). Bold rows are new in the last refresh. |
-| **Other sites** | The same, but on a site Quiver can't read yet: SourceForge, itch.io, a project's own website, a web port. Kept apart for when Quiver supports custom sites. |
+| **Missing** | Projects other sites list that Quiver doesn't, on a code host Quiver reads releases from: GitHub, GitLab, and Forgejo/Gitea servers such as Codeberg (see below). Bitbucket isn't counted: the launcher's code has a Bitbucket provider, but the catalog has no app from it. Bold rows are new in the last refresh. |
+| **Other sites** | The same, but on a site Quiver can't read yet: SourceForge, itch.io, Bitbucket, a project's own website, a web port. Kept apart for when Quiver supports custom sites. |
+| **Taken down** | Projects whose link was found deleted, blocked (DMCA), disabled, or unreachable (see *Checking links*). Kept out of Missing and Other sites. |
 | **Waiting** | Projects you're waiting on, and why: Quiver must support its site first, no source code yet, no release file yet, or something else, with a note. A green row is in Quiver now, so you can take it off the list. |
 | **Blacklist** | Projects you decided not to add, with a note. Grey rows are no longer listed anywhere. |
 | **In Quiver** | Quiver's catalog, each app's latest release, and which other sites also list it. |
@@ -126,6 +127,40 @@ everything look new or missing. The error is shown in the Log tab.
 The first refresh marks everything it finds as already known. After that, each project first found in a refresh
 gets that refresh's time in *First seen*, and *New* shows those from the newest one.
 
+## Checking links
+
+Listing sites keep projects whose repository is long gone. **File → Check links** (Ctrl+L) checks the links of every
+project and every Quiver app that's new or due, and the *Link* column and details pane say what it found:
+
+| Link | Meaning |
+| --- | --- |
+| ok | there |
+| archived | there, read-only |
+| moved → owner/name | renamed or moved; it's matched against Quiver under its new name too |
+| gone | deleted, or made private (404/410) |
+| blocked (DMCA) | GitHub's "Repository access blocked", or HTTP 451 |
+| disabled | disabled by GitHub |
+| unreachable | the site didn't answer, twice, a day or more apart |
+
+GitHub repositories are checked through GitHub's API, 50 to a request, with a **GitHub token** (Settings → API keys):
+about 130 requests for 6,500 repositories. Without a token, each repository's page is loaded instead, two at a time,
+and checking stops for the day if GitHub asks to slow down. GitLab and Forgejo/Gitea repositories are checked through
+their APIs, other sites by asking for the page. Right-click a row for *Check link now*.
+
+A link is checked again after 14 days if it was fine, 60 if it was taken down, and a day if its site didn't answer.
+With a GitHub token, links that are due are checked after every refresh (Settings → Sites can turn that off). In
+the In Quiver tab, Quiver apps whose own link is taken down are red.
+
+## API keys
+
+**Settings → API keys** has a field for a GitHub token and one for a GitLab token, each with a *Create a token*
+button that opens the site's page for making one, and *Test*, which says whose token it is and how many requests it
+has left. Neither needs any permission: a GitHub classic token with no scopes ticked reads public repositories, and
+the GitLab link opens the form with `read_api` ticked.
+
+Tokens are kept in `tokens.json` in the data folder, not in `settings.json`, so settings can be shared and tokens
+not. The `GITHUB_TOKEN` and `GITLAB_TOKEN` environment variables work too.
+
 ## Sharing between maintainers
 
 What you decide (Waiting and Blacklist) lives in its own file, `decisions.json`, apart from everything that can be
@@ -139,6 +174,11 @@ downloaded again. To share it, point **Settings → Decisions file** at the same
 Every change reads the file again first and writes back only that change, so one maintainer's edits don't undo
 another's. The window also reloads it when you come back to it. Set **Your name** in Settings to have it on each
 decision.
+
+Links found taken down or moved go in a second shareable file, `taken-down.json` (**Settings → Sharing →
+Taken-down list**), merged the same way. A link someone else checked more recently than you is taken from it instead
+of being checked again, so maintainers sharing it split the requests between them. Links found fine again are taken
+off it.
 
 The database (`scout.db`) is a local cache: everyone keeps their own and a refresh rebuilds it. Don't put it in a
 synced folder.
@@ -156,8 +196,15 @@ page.
 python -m quiver_scout missing missing.csv --refresh
 ```
 
-refreshes and writes the projects Quiver is missing. `--list other`, `--list waiting`, `--list blacklist` or
-`--list all` writes another list instead, and `--new-only` keeps only those new in the last refresh.
+refreshes and writes the projects Quiver is missing. `--list other`, `--list taken`, `--list waiting`,
+`--list blacklist` or `--list all` writes another list instead, and `--new-only` keeps only those new in the last
+refresh. Every list has `link`, `link_checked` and `moved_to` columns.
+
+```bash
+python -m quiver_scout check-links
+```
+
+checks the links that are new or due; `--all` checks every one again.
 
 ```bash
 python -m quiver_scout refresh
@@ -167,8 +214,9 @@ only refreshes, for running on a schedule. `--full` reads everything again.
 
 ## Settings and data
 
-Settings are in File → Settings: which sites to read, the unbaked full scan, whether to include clones, a Quiver CSV
-to use instead of the API, the decisions file, and your name.
+Settings are in File → Settings, in three tabs: **Sites** (which to read, the unbaked full scan, clones, checking
+links after refresh, a Quiver CSV to use instead of the API), **Sharing** (the decisions file, the taken-down list,
+your name) and **API keys**.
 
 **Quiver CSV**: when Quiver's admins export the catalog, pick the file here. It needs a URL column (`url`,
 `repository`, `repo`, `source` or similar), and uses `title`, `game` and `slug` columns when it has them.
@@ -181,7 +229,9 @@ the `QUIVER_SCOUT_HOME` environment variable puts it somewhere else.
 | --- | --- |
 | `settings.json` | Options, sort orders and hidden columns |
 | `decisions.json` | Waiting and Blacklist (shareable, see above) |
-| `scout.db` | SQLite: each source's items (table `items`), pages already read (`pages`), the ETag or Last-Modified of each catalog file (`http_cache`), and when each project was first seen (`seen`) |
+| `taken-down.json` | Links found taken down or moved (shareable, see above) |
+| `tokens.json` | GitHub and GitLab tokens. Never share it. |
+| `scout.db` | SQLite: each source's items (table `items`), pages already read (`pages`), the ETag or Last-Modified of each catalog file (`http_cache`), when each project was first seen (`seen`), and each link's last check (`links`) |
 
 Version 0.1's `snapshot.json`, `seen.json`, cache and `blacklist.json` are moved in on first start; nothing is read
 again.

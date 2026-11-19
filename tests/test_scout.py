@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from quiver_scout import engine, forges, names, net
+from quiver_scout import engine, forges, linkcheck, names, net
+from quiver_scout.takendown import TakenDown
 from quiver_scout.decisions import BLACKLIST, WAITING, Decisions
 from quiver_scout.sources import (Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
                                   recomplauncher, trilarion, unbaked)
@@ -260,6 +261,88 @@ class Forges(unittest.TestCase):
         self.assertFalse(forges.looks_like_repo("someone.itch.io/game"))
 
 
+class LinkCheck(unittest.TestCase):
+    def graphql(self, payload):
+        class R:
+            def __init__(self, body): self.body = body
+            def read(self): return self.body
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        return mock.patch("urllib.request.urlopen", return_value=R(json.dumps(payload).encode()))
+
+    def test_github_graphql_reads_every_state(self):
+        repos = [("github.com/a/ok", "a", "ok"), ("github.com/a/old", "a", "old"), ("github.com/a/gone", "a", "gone"),
+                 ("github.com/a/dmca", "a", "dmca"), ("github.com/a/arch", "a", "arch"), ("github.com/a/off", "a", "off"),
+                 ("github.com/a/odd", "a", "odd")]
+        payload = {"data": {
+            "r0": {"nameWithOwner": "a/ok", "url": "https://github.com/a/ok", "isArchived": False, "isDisabled": False, "isLocked": False},
+            "r1": {"nameWithOwner": "b/new", "url": "https://github.com/b/new", "isArchived": False, "isDisabled": False, "isLocked": False},
+            "r2": None, "r3": None,
+            "r4": {"nameWithOwner": "a/arch", "url": "u", "isArchived": True, "isDisabled": False, "isLocked": False},
+            "r5": {"nameWithOwner": "a/off", "url": "u", "isArchived": False, "isDisabled": True, "isLocked": False},
+            "r6": None},
+            "errors": [{"type": "NOT_FOUND", "path": ["r2"], "message": "Could not resolve to a Repository"},
+                       {"type": "FORBIDDEN", "path": ["r3"], "message": "Repository access blocked"},
+                       {"type": "SOMETHING", "path": ["r6"], "message": "timeout"}]}
+        with self.graphql(payload):
+            out = linkcheck.github_graphql(repos, "token")
+        self.assertEqual({k.split("/")[-1]: v["status"] for k, v in out.items()},
+                         {"ok": "ok", "old": "moved", "gone": "gone", "dmca": "blocked", "arch": "archived", "off": "disabled"})
+        self.assertEqual(out["github.com/a/old"]["moved_to"], "https://github.com/b/new")
+
+    def test_gitlab_and_gitea(self):
+        def fake(url, **kw):
+            if "missing" in url:
+                raise net.HTTPStatusError("404", 404)
+            if "gitlab" in url:
+                return net.Response(200, json.dumps({"path_with_namespace": "g/p", "archived": True, "web_url": "w"}).encode())
+            return net.Response(200, json.dumps({"full_name": "new/name", "archived": False, "html_url": "https://codeberg.org/new/name"}).encode())
+        with mock.patch.object(net, "request", side_effect=fake):
+            self.assertEqual(linkcheck.gitlab("gitlab.com/g/p")["status"], "archived")
+            self.assertEqual(linkcheck.gitlab("gitlab.com/g/missing")["status"], "gone")
+            self.assertEqual(linkcheck.gitea("codeberg.org/old/name"), {"status": "moved", "moved_to": "https://codeberg.org/new/name"})
+            self.assertEqual(linkcheck.gitea("codeberg.org/x/missing")["status"], "gone")
+
+    def test_unreachable_needs_two_days(self):
+        first = linkcheck.merge(None, {"status": "suspect"}, "2026-11-18")
+        self.assertEqual(first["status"], "suspect")
+        self.assertEqual(linkcheck.merge(first, {"status": "suspect"}, "2026-11-18")["status"], "suspect")
+        self.assertEqual(linkcheck.merge(first, {"status": "suspect"}, "2026-11-19")["status"], "unreachable")
+        self.assertEqual(linkcheck.merge(first, {"status": "ok"}, "2026-11-19")["status"], "ok")
+
+    def test_due(self):
+        from datetime import date
+        today = date(2026, 11, 19)
+        self.assertTrue(linkcheck.due(None, today))
+        self.assertFalse(linkcheck.due({"status": "ok", "checked": "2026-11-10"}, today))
+        self.assertTrue(linkcheck.due({"status": "ok", "checked": "2026-11-01"}, today))
+        self.assertFalse(linkcheck.due({"status": "gone", "checked": "2026-10-01"}, today))
+
+    def test_check_without_token_uses_pages_and_stops_when_told(self):
+        calls = []
+
+        def web(key, url):
+            calls.append(key)
+            raise linkcheck.RateLimited("slow down")
+        with mock.patch.object(linkcheck, "github_web", side_effect=web), \
+                mock.patch.object(linkcheck, "page", return_value={"status": "gone"}):
+            out = linkcheck.check([("github.com/a/b", "u"), ("github.com/a/c", "u"), ("example.com/x", "u")], {}, {})
+        self.assertEqual(out, {"example.com/x": {"status": "gone"}})
+
+
+class TakenDownFile(unittest.TestCase):
+    def test_shared_list_merges_and_drops_fixed_links(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "taken-down.json"
+            a, b = TakenDown(path), TakenDown(path)
+            a.update({"github.com/x/1": {"status": "gone", "checked": "2026-11-19"}}, {"github.com/x/1": "https://github.com/x/1"}, by="alice")
+            b.update({"github.com/x/2": {"status": "blocked", "checked": "2026-11-19"},
+                      "github.com/x/3": {"status": "ok", "checked": "2026-11-19"}}, {})
+            self.assertEqual(set(TakenDown(path).entries), {"github.com/x/1", "github.com/x/2"})
+            a.update({"github.com/x/1": {"status": "ok", "checked": "2026-11-20"}}, {})
+            self.assertEqual(set(TakenDown(path).entries), {"github.com/x/2"})
+
+
 class ConditionalDownloads(unittest.TestCase):
     def test_304_reuses_the_saved_body(self):
         with tempfile.TemporaryDirectory() as d:
@@ -417,6 +500,46 @@ class Compare(unittest.TestCase):
         self.assertEqual(by["B"].systems, ["PC", "Android", "Linux", "Mac"])
         self.assertEqual(by["SM64 port"].systems, ["Android"])  # from its name
         self.assertEqual(by["PC only"].systems, [])
+
+
+    def test_taken_down_projects_leave_missing(self):
+        self.put([Item("playported", "https://github.com/x/gone", "Gone"), Item("playported", "https://github.com/x/fine", "Fine")])
+        self.store.save_links({"github.com/x/gone": {"status": "gone", "checked": "2026-11-19"},
+                               "github.com/x/fine": {"status": "ok", "checked": "2026-11-19"}})
+        r = engine.compare(self.store)
+        self.assertEqual([c.title for c in r.missing], ["Fine"])
+        self.assertEqual([c.title for c in r.taken_down], ["Gone"])
+
+    def test_shared_list_is_used_when_newer(self):
+        self.put([Item("playported", "https://github.com/x/y", "Y")])
+        self.store.save_links({"github.com/x/y": {"status": "ok", "checked": "2026-11-01"}})
+        self.store.taken_down.update({"github.com/x/y": {"status": "blocked", "checked": "2026-11-19"}}, {}, by="bob")
+        r = engine.compare(self.store)
+        self.assertEqual([(c.title, c.link["by"]) for c in r.taken_down], [("Y", "bob")])
+
+    def test_renamed_repository_matches_quiver(self):
+        self.put([Item("quiver", "https://github.com/new/name", "Q", slug="q"), Item("playported", "https://github.com/old/name", "Old")])
+        self.store.save_links({"github.com/old/name": {"status": "moved", "moved_to": "https://github.com/New/Name", "checked": "2026-11-19"}})
+        r = engine.compare(self.store)
+        self.assertEqual(r.missing, [])
+        self.assertEqual(next(c for c in r.candidates if c.title == "Old").in_quiver[0].slug, "q")
+
+    def test_check_links_saves_and_shares(self):
+        self.put([Item("playported", "https://github.com/x/gone", "Gone"), Item("quiver", "https://github.com/q/q", "Q")])
+        with mock.patch.object(linkcheck, "check", return_value={"github.com/x/gone": {"status": "gone"},
+                                                                 "github.com/q/q": {"status": "ok"}}) as c:
+            counts = engine.check_links(self.store)
+        self.assertEqual(sorted(k for k, _ in c.call_args.args[0]), ["github.com/q/q", "github.com/x/gone"])
+        self.assertEqual((counts["gone"], counts["ok"]), (1, 1))
+        self.assertEqual(list(self.store.taken_down.entries), ["github.com/x/gone"])
+        with mock.patch.object(linkcheck, "check", return_value={}) as c:
+            self.assertEqual(engine.check_links(self.store)["checked"], 0)  # nothing due: nothing asked
+        c.assert_not_called()
+
+    def test_bitbucket_is_another_site(self):
+        self.put([Item("playported", "https://bitbucket.org/a/b", "BB"), Item("playported", "https://codeberg.org/a/b", "CB")])
+        r = engine.compare(self.store)
+        self.assertEqual(([c.title for c in r.missing], [c.title for c in r.other_sites]), (["CB"], ["BB"]))
 
 
     def test_csv_exports(self):

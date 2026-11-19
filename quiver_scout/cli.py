@@ -9,7 +9,7 @@ from . import __version__, engine
 from .sources import Context, quiver
 from .store import Store
 
-LISTS = ("missing", "other", "waiting", "blacklist", "all")
+LISTS = ("missing", "other", "taken", "waiting", "blacklist", "all")
 
 
 def _progress(message: str, done: int = 0, total: int = 0) -> None:
@@ -30,10 +30,14 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("refresh", help="read every source and save what changed")
     r.add_argument("--full", action="store_true", help="ignore what's cached and read everything again")
 
+    lc = sub.add_parser("check-links", help="check which projects' links are taken down, moved or archived")
+    lc.add_argument("--all", action="store_true", help="every link again, not only new ones and ones due a check")
+
     m = sub.add_parser("missing", help="write a list of projects to a CSV file (default: those Quiver is missing)")
     m.add_argument("output", nargs="?", default="missing.csv")
     m.add_argument("--list", choices=LISTS, default="missing",
-                   help="missing (on code hosts Quiver reads), other (other sites), waiting, blacklist, or all")
+                   help="missing (on code hosts Quiver reads), other (other sites), taken (links taken down), "
+                        "waiting, blacklist, or all")
     m.add_argument("--refresh", action="store_true", help="refresh first instead of using the last refresh")
     m.add_argument("--new-only", action="store_true", help="only projects first seen in the last refresh")
     m.add_argument("--all", action="store_true", help="same as --list all")
@@ -54,6 +58,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote {n} Quiver apps to {a.output}")
         return 0
 
+    if a.command == "check-links":
+        counts = engine.check_links(store, _progress, everything=a.all)
+        print(", ".join(f"{k} {v}" for k, v in counts.items()))
+        return 0
+
     if a.command == "refresh" or getattr(a, "refresh", False) or not store.meta("refresh"):
         result = engine.refresh(store, _progress, full=getattr(a, "full", False))
         for e in result["errors"]:
@@ -66,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     rows = {
         "missing": c.missing,
         "other": c.other_sites,
+        "taken": c.taken_down,
         "waiting": c.decided(engine.WAITING),
         "blacklist": c.decided(engine.BLACKLIST),
         "all": [x for x in c.candidates if x.listed],

@@ -4,6 +4,8 @@ settings.json   options
 scout.db        SQLite: every source's items, pages already read, HTTP validators, when projects were first seen.
                 Local to this computer; anyone can rebuild it with a refresh.
 decisions.json  Waiting and Blacklist (see decisions.py). Plain JSON, so it can live in a shared folder or a git repo.
+taken-down.json Links found taken down or moved (see takendown.py). Shareable the same way.
+tokens.json     GitHub and GitLab tokens. Kept out of settings.json so that can be shared; never share this one.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import zlib
 from pathlib import Path
 
 from .decisions import Decisions
+from .takendown import TakenDown
 
 DEFAULT_SETTINGS = {
     "sources": {"recomplauncher": True, "decompbuddy": True, "unbaked": True, "playported": True,
@@ -31,6 +34,10 @@ DEFAULT_SETTINGS = {
     "quiver_csv": "",
     # Where Waiting and Blacklist live; empty means decisions.json in the data folder.
     "decisions_path": "",
+    # Where the shared list of taken-down links lives; empty means taken-down.json in the data folder.
+    "taken_down_path": "",
+    # Check links that are due (new, or not checked for a while) after each refresh.
+    "check_links": True,
     # Put on each decision, so maintainers sharing the file can see who made it.
     "your_name": "",
     "theme": "system",  # "system", "light" or "dark"
@@ -53,6 +60,8 @@ CREATE TABLE IF NOT EXISTS http_cache (
     url TEXT PRIMARY KEY, etag TEXT, last_modified TEXT, body BLOB, fetched_at TEXT
 );
 CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, first_seen TEXT);
+-- What the last check of each link found (see linkcheck.py).
+CREATE TABLE IF NOT EXISTS links (key TEXT PRIMARY KEY, data TEXT);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 """
 
@@ -101,6 +110,7 @@ class Store:
         if new:
             self._migrate_json()
         self.decisions = Decisions(self.decisions_file, legacy=self._legacy_blacklist())
+        self.taken_down = TakenDown(self.taken_down_file)
 
     # ---- settings and decisions ----------------------------------------------------------------------------------
 
@@ -108,6 +118,26 @@ class Store:
     def decisions_file(self) -> Path:
         custom = self.settings.get("decisions_path")
         return Path(custom) if custom else self.dir / "decisions.json"
+
+    @property
+    def taken_down_file(self) -> Path:
+        custom = self.settings.get("taken_down_path")
+        return Path(custom) if custom else self.dir / "taken-down.json"
+
+    # ---- tokens --------------------------------------------------------------------------------------------------
+
+    def tokens(self) -> dict[str, str]:
+        """github and gitlab tokens: tokens.json, else the GITHUB_TOKEN / GITLAB_TOKEN environment variables."""
+        saved = read_json(self.dir / "tokens.json", {})
+        return {site: saved.get(site) or os.environ.get(f"{site.upper()}_TOKEN", "") for site in ("github", "gitlab")}
+
+    def save_tokens(self, tokens: dict[str, str]) -> None:
+        path = self.dir / "tokens.json"
+        write_json(path, {k: v.strip() for k, v in tokens.items() if v and v.strip()})
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
 
     def _legacy_blacklist(self) -> list[Path]:
         paths = [self.dir / "blacklist.json"]
@@ -120,6 +150,8 @@ class Store:
         write_json(self.dir / "settings.json", self.settings)
         if Path(self.decisions.path) != self.decisions_file:
             self.decisions = Decisions(self.decisions_file, legacy=[self.decisions.path])
+        if Path(self.taken_down.path) != self.taken_down_file:
+            self.taken_down = TakenDown(self.taken_down_file)
 
     # ---- items ---------------------------------------------------------------------------------------------------
 
@@ -174,6 +206,17 @@ class Store:
     def clear_http(self) -> None:
         with self.lock, self.db:
             self.db.execute("DELETE FROM http_cache")
+
+    # ---- link checks ---------------------------------------------------------------------------------------------
+
+    def links(self) -> dict[str, dict]:
+        with self.lock:
+            return {k: json.loads(d) for k, d in self.db.execute("SELECT key, data FROM links").fetchall()}
+
+    def save_links(self, entries: dict[str, dict]) -> None:
+        with self.lock, self.db:
+            self.db.executemany("INSERT OR REPLACE INTO links VALUES (?, ?)",
+                                [(k, json.dumps(v, ensure_ascii=False)) for k, v in entries.items()])
 
     # ---- first seen and meta -------------------------------------------------------------------------------------
 
