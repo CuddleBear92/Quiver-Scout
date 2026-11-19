@@ -13,7 +13,7 @@ import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 from . import __version__, engine, theme
-from .decisions import BLACKLIST, WAIT_REASONS, WAITING
+from .decisions import BLACKLIST, BLACKLIST_REASONS, WAIT_REASONS, WAITING, reason_label
 from .engine import Candidate, Comparison
 from .sources import EXTERNAL, Item
 from .linkcheck import TAKEN_DOWN as TAKEN_DOWN_STATES
@@ -35,7 +35,7 @@ COL = {
     "first_seen": ("First seen", 115, "date"),
     "same_app": ("App in Quiver", 120, ""),
     "same_game": ("Game in Quiver", 120, ""),
-    "reason": ("Waiting for", 200, ""),
+    "reason": ("Reason", 220, ""),
     "note": ("Note", 220, ""),
     "since": ("Since", 100, "date"),
     "by": ("By", 90, ""),
@@ -57,7 +57,7 @@ TABS = {
                              "same_app", "same_game", "url"]),
     "waiting": ("Waiting", ["title", "game", "reason", "note", "released", "version", "sources", "since", "by", "state",
                             "runs_on", "link", "checked", "url"]),
-    "blacklist": ("Blacklist", ["title", "game", "note", "since", "by", "state", "link", "checked", "url"]),
+    "blacklist": ("Blacklist", ["title", "game", "reason", "note", "since", "by", "state", "link", "checked", "url"]),
     "quiver": ("In Quiver", ["title", "game", "released", "version", "added", "also_on", "link", "checked", "slug",
                              "url"]),
     "qdown": ("Down in Quiver", ["title", "game", "link", "checked", "replacement", "released", "version", "added", "slug",
@@ -415,7 +415,7 @@ class DecisionDialog(tk.Toplevel):
     """Asks why: a reason to wait (for Waiting) and a note."""
 
     def __init__(self, app: "App", title: str, message: str, reasons: dict | None = None, reason: str = "",
-                 note: str = ""):
+                 note: str = "", prompt: str = "Waiting for:"):
         super().__init__(app.root)
         self.result: tuple[str, str] | None = None
         self.title(title)
@@ -426,10 +426,12 @@ class DecisionDialog(tk.Toplevel):
         ttk.Label(body, text=message, font=app.c["fonts"]["bold"], wraplength=440).pack(anchor="w")
         self.reason = tk.StringVar(value=reason or (next(iter(reasons)) if reasons else ""))
         if reasons:
-            ttk.Label(body, text="Waiting for:", style="Muted.TLabel").pack(anchor="w", pady=(10, 2))
+            ttk.Label(body, text=prompt, style="Muted.TLabel").pack(anchor="w", pady=(10, 2))
             for n, (rid, label) in enumerate(reasons.items(), start=1):
-                ttk.Radiobutton(body, text=f"{n}  {label}", value=rid, variable=self.reason).pack(anchor="w", pady=1)
-                self.bind(str(n), lambda e, r=rid: self.reason.set(r) if e.widget is not self.entry else None)
+                key = str(n % 10) if n <= 10 else ""  # 1-9, then 0 for the tenth
+                ttk.Radiobutton(body, text=f"{key or ' '}  {label}", value=rid, variable=self.reason).pack(anchor="w", pady=1)
+                if key:
+                    self.bind(key, lambda e, r=rid: self.reason.set(r) if e.widget is not self.entry else None)
         ttk.Label(body, text="Note (optional):", style="Muted.TLabel").pack(anchor="w", pady=(10, 2))
         self.note = tk.StringVar(value=note)
         self.entry = ttk.Entry(body, textvariable=self.note, width=58)
@@ -851,7 +853,7 @@ class App:
                     continue
             d = c.decision or {}
             if text and not self._matches(text, c.title, c.game, c.url, c.author, c.platform, c.method,
-                                          d.get("note", ""), d.get("by", "")):
+                                          d.get("note", ""), d.get("by", ""), reason_label(d)):
                 continue
             out.append(c)
         return out
@@ -871,7 +873,7 @@ class App:
             "first_seen": "" if c.first_seen == "initial" else c.first_seen,
             "same_app": same_app_text(c),
             "same_game": f"yes ({len(c.same_game)})" if c.same_game else "",
-            "reason": WAIT_REASONS.get(d.get("reason", ""), d.get("reason", "")), "note": d.get("note", ""),
+            "reason": reason_label(d), "note": d.get("note", ""),
             "since": d.get("date", ""), "by": d.get("by", ""), "state": state, "url": c.url,
             **link_values(c.link),
         }
@@ -984,7 +986,8 @@ class App:
             b.config(state=on(cur != "log"))
         self.btn_wait.config(state=on(cur in ("missing", "other", "taken", "waiting", "blacklist")),
                              text="Change why…  W" if cur == "waiting" else "Wait…  W")
-        self.btn_black.config(state=on(cur in ("missing", "other", "taken", "waiting")))
+        self.btn_black.config(state=on(cur in ("missing", "other", "taken", "waiting", "blacklist")),
+                              text="Change reason…" if cur == "blacklist" else "Blacklist…  Del")
         self.btn_back.config(state=on(cur in ("waiting", "blacklist")))
         self.btn_quiver.config(state=on(bool(self.quiver_pages())))
 
@@ -1084,16 +1087,30 @@ class App:
         self._after_decision(keys, f"Waiting for {self._describe(cands)}: {WAIT_REASONS[dlg.result[0]]}")
 
     def blacklist_selected(self) -> None:
-        if self.current() not in ("missing", "other", "taken", "waiting"):
+        """Blacklist the selection, with a reason; on the Blacklist tab, change the reason."""
+        if self.current() not in ("missing", "other", "taken", "waiting", "blacklist"):
             return
         cands = self.selected_candidates()
         if not cands:
             return
-        dlg = DecisionDialog(self, "Blacklist", f"Blacklist {self._describe(cands)}?")
+        editing = self.current() == "blacklist"
+        d = (cands[0].decision or {}) if editing else {}
+        dlg = DecisionDialog(self, "Blacklist", (f"Why is {self._describe(cands)} blacklisted?" if editing
+                                                 else f"Blacklist {self._describe(cands)}?"),
+                             BLACKLIST_REASONS, reason=d.get("reason", "") if editing else "",
+                             note=d.get("note", "") if editing and len(cands) == 1 else "", prompt="Reason:")
         if not dlg.result:
             return
-        engine.decide(self.store, BLACKLIST, cands, note=dlg.result[1])
-        self._after_decision([c.key for c in cands], f"Blacklisted {self._describe(cands)}")
+        engine.decide(self.store, BLACKLIST, cands, reason=dlg.result[0], note=dlg.result[1])
+        self._after_decision([c.key for c in cands],
+                             f"Blacklisted {self._describe(cands)}: {BLACKLIST_REASONS.get(dlg.result[0], '')}")
+
+    def _quick_blacklist(self, reason: str) -> None:
+        cands = self.selected_candidates()
+        if cands:
+            engine.decide(self.store, BLACKLIST, cands, reason=reason)
+            self._after_decision([c.key for c in cands],
+                                 f"Blacklisted {self._describe(cands)}: {BLACKLIST_REASONS[reason]}")
 
     def undecide_selected(self) -> None:
         if self.current() not in ("waiting", "blacklist"):
@@ -1142,8 +1159,13 @@ class App:
                 m.add_cascade(label="Wait for…", menu=wait)
             else:
                 m.add_command(label="Change why…", command=self.wait_selected)
-            if cur != "blacklist":
-                m.add_command(label="Blacklist…", command=self.blacklist_selected)
+            black = tk.Menu(m, tearoff=False)
+            for rid, label in BLACKLIST_REASONS.items():
+                black.add_command(label=label, command=lambda r=rid: self._quick_blacklist(r))
+            black.add_separator()
+            black.add_command(label="With a note…", command=self.blacklist_selected)
+            theme.style_menu(black, self.c)
+            m.add_cascade(label="Change reason to…" if cur == "blacklist" else "Blacklist for…", menu=black)
             if cur in ("waiting", "blacklist"):
                 m.add_command(label="Back to the list", command=self.undecide_selected)
             cands = self.selected_candidates()
@@ -1350,7 +1372,7 @@ class App:
         dec = c.decision
         if dec:
             self._line("Waiting for" if dec.get("list") == WAITING else "Blacklisted")
-            what = WAIT_REASONS.get(dec.get("reason", ""), "") if dec.get("list") == WAITING else ""
+            what = reason_label(dec)
             d.insert("end", " · ".join(x for x in (what, dec.get("note", ""), f"since {dec.get('date', '')}",
                                                     f"by {dec['by']}" if dec.get("by") else "") if x))
 

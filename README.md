@@ -72,7 +72,7 @@ pip install .
 | **Other sites** | The same, but on a site Quiver can't read yet: SourceForge, itch.io, Bitbucket, a project's own website, a web port. Kept apart for when Quiver supports custom sites. |
 | **Taken down** | Projects whose link was found deleted, blocked (DMCA), disabled, or unreachable (see *Checking links*). Kept out of Missing and Other sites. |
 | **Waiting** | Projects you're waiting on, and why: Quiver must support its site first, no source code yet, no release file yet, or something else, with a note. A green row is in Quiver now, so you can take it off the list. |
-| **Blacklist** | Projects you decided not to add, with a note. Grey rows are no longer listed anywhere. |
+| **Blacklist** | Projects you decided not to add, with a reason and a note. Grey rows are no longer listed anywhere. |
 | **In Quiver** | Quiver's catalog, each app's latest release, and which other sites also list it. |
 | **Down in Quiver** | Quiver's own live apps whose repository is taken down, to archive them or swap in a new host. Green rows have a possible replacement (see below). Apps you archive, or whose repository you change, leave it (see *Live check*). |
 | **Log** | What each refresh did, and any site that failed. |
@@ -128,6 +128,13 @@ follow too. Alt+F, Alt+V and Alt+H open the menus.
 | Ctrl+1 … Ctrl+5 | Switch tabs |
 | Ctrl+F / Esc | Search / clear the search |
 | Ctrl+E | Export the current list as CSV |
+
+**Blacklist reasons** are a fixed set, so every entry reads the same and the Reason column sorts and searches
+cleanly: *Part of a launcher*, *Decent official PC port available*, *Low quality*, *Banned creator*, *Decomp only,
+not a port*, *Needs pirated or bundled game files*, *Fork or duplicate of another project*, *Not a game (engine,
+library, tool)*, *Abandoned, never released*, *Unsafe (malware or suspicious files)* and *Other*. The dialog offers
+them with keys 1–9 and 0, plus an optional note; right-click has *Blacklist for…* with each one in one click. On the
+Blacklist tab, *Change reason…* changes it. The list is `BLACKLIST_REASONS` in `quiver_scout/decisions.py`.
 
 Right-click a row for the same actions, including *Wait for…* with each reason in one click. After waiting or
 blacklisting, the selection moves to the next row, so you can work down a list from the keyboard.

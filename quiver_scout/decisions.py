@@ -24,6 +24,29 @@ WAIT_REASONS = {
     "other": "Other",
 }
 
+# Why a project is blacklisted, so the wording is the same on every one. Offered in this order.
+BLACKLIST_REASONS = {
+    "launcher": "Part of a launcher",
+    "official": "Decent official PC port available",
+    "quality": "Low quality",
+    "banned": "Banned creator",
+    "decomp": "Decomp only, not a port",
+    "piracy": "Needs pirated or bundled game files",
+    "duplicate": "Fork or duplicate of another project",
+    "notgame": "Not a game (engine, library, tool)",
+    "abandoned": "Abandoned, never released",
+    "unsafe": "Unsafe (malware or suspicious files)",
+    "other": "Other",
+}
+
+
+def reason_label(entry: dict | None) -> str:
+    """The wording of a decision's reason, whichever list it's on."""
+    if not entry or not entry.get("reason"):
+        return ""
+    table = WAIT_REASONS if entry.get("list") == WAITING else BLACKLIST_REASONS
+    return table.get(entry["reason"], entry["reason"])
+
 
 class Decisions:
     def __init__(self, path: str | Path, legacy: list[Path] | None = None):
@@ -92,6 +115,8 @@ class Decisions:
                      "note": note, "date": today}
             if which == WAITING:
                 entry["reason"] = reason or "other"
+            elif reason:
+                entry["reason"] = reason
             if by:
                 entry["by"] = by
             self.entries[p["key"]] = entry

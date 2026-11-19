@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .decisions import BLACKLIST, WAIT_REASONS, WAITING
+from .decisions import BLACKLIST, WAIT_REASONS, WAITING, reason_label
 from . import forges, names
 from .sources import (EXTERNAL, Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
                       recomplauncher, trilarion, unbaked)
@@ -580,7 +580,7 @@ def undecide(store: Store, keys: list[str]) -> None:
 QUIVER_COLUMNS = ["title", "game", "url", "provider", "slug", "developer", "type", "added", "latest_release",
                   "version", "quiver_page", "link", "link_checked", "moved_to"]
 CANDIDATE_COLUMNS = ["title", "game", "url", "host", "sources", "method", "platform", "author", "listed_since",
-                     "latest_release", "version", "last_push", "first_seen", "status", "waiting_for", "note",
+                     "latest_release", "version", "last_push", "first_seen", "status", "reason", "note",
                      "quiver_apps_with_same_name", "quiver_apps_for_same_game", "link", "link_checked", "moved_to", *[f"{s}_page" for s in EXTERNAL]]
 
 
@@ -615,7 +615,7 @@ def write_candidates_csv(path: str, candidates: list[Candidate]) -> int:
             w.writerow([
                 c.title, c.game, c.url, c.host, ", ".join(EXTERNAL[s] for s in c.sources), c.method, c.platform,
                 c.author, c.added, c.released, c.version, c.pushed, "" if c.first_seen == "initial" else c.first_seen,
-                status_of(c), WAIT_REASONS.get(d.get("reason", ""), "") if d.get("list") == WAITING else "",
+                status_of(c), reason_label(d),
                 d.get("note", ""), "; ".join(q.title for q in c.same_app), "; ".join(q.title for q in c.same_game),
                 c.link_status,
                 (c.link or {}).get("checked", ""), (c.link or {}).get("moved_to", ""), *[c.pages.get(s, "") for s in EXTERNAL],
