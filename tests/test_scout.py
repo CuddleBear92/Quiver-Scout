@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from quiver_scout import engine, forges, linkcheck, names, net
+from quiver_scout import engine, forges, linkcheck, names, net, replacements
 from quiver_scout.takendown import TakenDown
 from quiver_scout.decisions import BLACKLIST, WAITING, Decisions
 from quiver_scout.sources import (Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
@@ -343,6 +343,38 @@ class TakenDownFile(unittest.TestCase):
             self.assertEqual(set(TakenDown(path).entries), {"github.com/x/2"})
 
 
+class Replacements(unittest.TestCase):
+    def test_finds_by_owner_and_name_listing_and_search(self):
+        known = {"codeberg.org/dev/game-recomp": "unbaked", "github.com/other/game-recomp": "Decomp Buddy",
+                 "gitlab.com/dev/another": "OSGL", "github.com/dev/game-recomp": "in Quiver",
+                 "github.com/gone/game-recomp": "PlayPorted"}
+        exists = {("gitlab.com", "dev", "game-recomp"): "https://gitlab.com/dev/game-recomp"}
+        searched = {"codeberg.org": ["https://codeberg.org/mirror/Game-Recomp"]}
+        with mock.patch.object(replacements, "_exists", side_effect=lambda h, o, n, t: exists.get((h, o, n))), \
+                mock.patch.object(replacements, "_search", side_effect=lambda h, n, t: searched.get(h, [])):
+            found = replacements.find("github.com/dev/game-recomp", known, {"github.com/gone/game-recomp"}, {})
+        by = {r["url"]: (r["how"], r["where"]) for r in found}
+        self.assertEqual(found[0]["how"], "same owner and name")
+        self.assertEqual(by["https://codeberg.org/dev/game-recomp"], ("same owner and name", "unbaked"))
+        self.assertEqual(by["https://gitlab.com/dev/game-recomp"][0], "same owner and name")
+        self.assertEqual(by["https://github.com/other/game-recomp"], ("same name", "Decomp Buddy"))
+        self.assertEqual(by["https://gitlab.com/dev/another"], ("same owner", "OSGL"))
+        self.assertEqual(by["https://codeberg.org/mirror/Game-Recomp"][0], "same name")
+        self.assertNotIn("https://github.com/gone/game-recomp", by)  # itself taken down
+        self.assertNotIn("https://github.com/dev/game-recomp", by)  # the one that's gone
+
+    def test_data_only_asks_nothing(self):
+        with mock.patch.object(replacements, "_exists") as e, mock.patch.object(replacements, "_search") as s_:
+            found = replacements.find("github.com/a/b", {"codeberg.org/a/b": "unbaked"}, set(), {}, ask=False)
+        e.assert_not_called(); s_.assert_not_called()
+        self.assertEqual([r["url"] for r in found], ["https://codeberg.org/a/b"])
+
+    def test_github_search_needs_a_token(self):
+        with mock.patch.object(replacements, "_json") as j:
+            self.assertEqual(replacements._search("github.com", "x", {}), [])
+        j.assert_not_called()
+
+
 class ConditionalDownloads(unittest.TestCase):
     def test_304_reuses_the_saved_body(self):
         with tempfile.TemporaryDirectory() as d:
@@ -566,6 +598,30 @@ class Compare(unittest.TestCase):
         path.write_text("[1, 2]")
         with self.assertRaises(ValueError):
             engine.import_file(self.store, str(path))
+
+
+    def test_quiver_apps_taken_down_and_their_replacements(self):
+        self.put([Item("quiver", "https://github.com/dev/game", "Game", slug="game"),
+                  Item("quiver", "https://github.com/dev/fine", "Fine", slug="fine"),
+                  Item("unbaked", "https://codeberg.org/dev/game", "Game mirror")])
+        with mock.patch.object(linkcheck, "check", return_value={"github.com/dev/game": {"status": "blocked"},
+                                                                 "github.com/dev/fine": {"status": "ok"},
+                                                                 "codeberg.org/dev/game": {"status": "ok"}}), \
+                mock.patch.object(replacements, "_exists", return_value=None), \
+                mock.patch.object(replacements, "_search", return_value=[]):
+            counts = engine.check_links(self.store)
+        self.assertEqual(counts["replacements"], 1)
+        r = engine.compare(self.store)
+        self.assertEqual([q.slug for q in r.quiver_down], ["game"])
+        link = r.links["github.com/dev/game"]
+        self.assertEqual([(x["url"], x["where"]) for x in link["replacements"]], [("https://codeberg.org/dev/game", "unbaked")])
+        self.assertEqual(self.store.taken_down.get("github.com/dev/game")["replacements"][0]["how"], "same owner and name")
+        # The next check of the same link keeps what was found, and isn't looked for again the same day.
+        with mock.patch.object(linkcheck, "check", return_value={"github.com/dev/game": {"status": "blocked"}}), \
+                mock.patch.object(replacements, "find") as f:
+            engine.check_links(self.store, keys=["github.com/dev/game"])
+        f.assert_not_called()
+        self.assertTrue(engine.compare(self.store).links["github.com/dev/game"]["replacements"])
 
 
     def test_csv_exports(self):

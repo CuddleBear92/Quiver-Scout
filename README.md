@@ -74,6 +74,7 @@ pip install .
 | **Waiting** | Projects you're waiting on, and why: Quiver must support its site first, no source code yet, no release file yet, or something else, with a note. A green row is in Quiver now, so you can take it off the list. |
 | **Blacklist** | Projects you decided not to add, with a note. Grey rows are no longer listed anywhere. |
 | **In Quiver** | Quiver's catalog, each app's latest release, and which other sites also list it. |
+| **Down in Quiver** | Quiver's own live apps whose repository is taken down, to archive them or swap in a new host. Green rows have a possible replacement (see below). |
 | **Log** | What each refresh did, and any site that failed. |
 
 Columns include **Latest release**, **Version**, **Last push**, **Listed since**, **First seen** and **Runs on**.
@@ -154,6 +155,22 @@ their APIs, other sites by asking for the page. Right-click a row for *Check lin
 A link is checked again after 14 days if it was fine, 60 if it was taken down, and a day if its site didn't answer.
 With a GitHub token, links that are due are checked after every refresh (Settings → Sites can turn that off). In
 the In Quiver tab, Quiver apps whose own link is taken down are red.
+
+### Replacements for taken-down repositories
+
+Developers often upload the same code to another host after a takedown. For each taken-down repository, Quiver
+Scout looks for it elsewhere and lists what it finds as *possible replacements*, best first:
+
+- **same owner and name** on GitHub, GitLab or Codeberg (asked directly), or already listed by a site,
+- **same owner** on another host, among projects already listed,
+- **same name**, among projects already listed, and by searching GitHub (with a token), GitLab and Codeberg.
+
+Taken-down Quiver apps are looked for every day, when links are checked, so a re-upload shows up soon after it
+appears. Other taken-down projects are matched against what's already listed, which costs no requests;
+right-click any taken-down row for *Find replacements now*. The *Possible replacement* column shows the best one
+(and how many more), the details pane and the right-click menu list them all. Same name isn't proof of same code:
+open it and look before swapping the host in Quiver. Replacements are kept with the link in the shared
+taken-down list.
 
 ## API keys
 
