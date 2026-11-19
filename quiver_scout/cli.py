@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import __version__, engine
+from . import engine, updater
 from .sources import Context, quiver
 from .store import Store
 
@@ -18,7 +18,7 @@ def _progress(message: str, done: int = 0, total: int = 0) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="quiver-scout", description="Find recomps and ports that Quiver Launcher doesn't list yet.")
-    p.add_argument("--version", action="version", version=__version__)
+    p.add_argument("--version", action="version", version=updater.version_text())
     p.add_argument("--data-dir", help="where settings, the database and decisions live (default: your user data folder)")
     sub = p.add_subparsers(dest="command")
 

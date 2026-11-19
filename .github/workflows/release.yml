@@ -50,17 +50,17 @@ jobs:
         shell: bash
         run: |
           python -m pip install --disable-pip-version-check pyinstaller==6.11.1
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name QuiverScout "Quiver Scout.pyw"
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name QuiverScout \
+            --icon quiver_scout/assets/icon.ico --add-data "quiver_scout/assets;quiver_scout/assets" "Quiver Scout.pyw"
 
       - name: Publish the release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(python -c "import quiver_scout; print(quiver_scout.__version__)")
           # A merged pull request's notes are its branch's commit message, not "Merge pull request #N".
           if git rev-parse -q --verify HEAD^2 >/dev/null; then git log -1 --format=%B HEAD^2; else git log -1 --format=%B; fi > notes.txt
           gh release create "build-${{ github.run_number }}" dist/QuiverScout.exe \
-            --title "Build ${{ github.run_number }} (v$version)" \
+            --title "Build ${{ github.run_number }}" \
             --notes-file notes.txt \
             --target "${{ github.sha }}"

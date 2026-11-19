@@ -10,9 +10,9 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import __version__
+from .updater import current_build
 
-USER_AGENT = f"quiver-scout/{__version__} (Quiver Launcher maintainer tool)"
+USER_AGENT = f"quiver-scout/build-{current_build()} (Quiver Launcher maintainer tool)"
 
 
 class FetchError(RuntimeError):

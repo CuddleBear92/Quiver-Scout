@@ -10,9 +10,10 @@ import sys
 import threading
 import tkinter as tk
 import webbrowser
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from . import __version__, engine, theme, updater
+from . import engine, theme, updater
 from .decisions import BLACKLIST, BLACKLIST_REASONS, WAIT_REASONS, WAITING, reason_label
 from .engine import Candidate, Comparison
 from .sources import EXTERNAL, Item
@@ -128,6 +129,21 @@ def same_app_text(c: Candidate) -> str:
     q = c.same_app[0]
     return "likely: " + q.url.split("://", 1)[-1].split("/", 1)[-1] + (
         f" (+{len(c.same_app) - 1})" if len(c.same_app) > 1 else "")
+
+
+ASSETS = Path(__file__).resolve().parent / "assets"
+
+
+def set_icon(window: tk.Tk) -> None:
+    """The arrowhead icon (quiver_scout/assets, drawn by tools/make_icon.py) on the window and its taskbar button."""
+    try:
+        if sys.platform == "win32" and (ASSETS / "icon.ico").exists():
+            window.iconbitmap(default=str(ASSETS / "icon.ico"))  # sharp at Windows' small sizes; dialogs get it too
+        icon = tk.PhotoImage(file=str(ASSETS / "icon.png"))
+        window.iconphoto(True, icon)
+        window._icon = icon  # keep it alive  # noqa: SLF001
+    except (tk.TclError, OSError):
+        pass
 
 
 def link_values(link: dict | None) -> dict:
@@ -469,7 +485,8 @@ class App:
         self._search_after = None
         self._links = 0
 
-        root.title("Quiver Scout")
+        root.title(f"Quiver Scout · {updater.version_text()}" if updater.current_build() else "Quiver Scout")
+        set_icon(root)
         root.minsize(960, 520)
         self._restore_window()
         self.c = theme.apply(root, store.settings.get("theme", "system"))
@@ -1553,11 +1570,11 @@ class App:
         notes = info["notes"].strip()
         notes = (notes[:700] + "…") if len(notes) > 700 else notes
         if not updater.frozen():
-            if messagebox.askyesno("Update available", f"{info['title']} is available; this copy runs from source "
-                                   f"({updater.version_text()}).\n\n{notes}\n\nOpen the release page?", parent=self.root):
+            if messagebox.askyesno("Update available", f"{info['title']} is available; this copy is running from "
+                                   f"source.\n\n{notes}\n\nOpen the release page?", parent=self.root):
                 open_url(info["page"])
             return
-        if messagebox.askyesno("Update available", f"{info['title']} is available (you have build {mine}).\n\n{notes}"
+        if messagebox.askyesno("Update available", f"{info['title']} is available (you have Build {mine}).\n\n{notes}"
                                "\n\nDownload it and restart Quiver Scout now?", parent=self.root):
             self.download_update(info)
         else:
