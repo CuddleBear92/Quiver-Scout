@@ -38,6 +38,9 @@ DEFAULT_SETTINGS = {
     "taken_down_path": "",
     # Check links that are due (new, or not checked for a while) after each refresh.
     "check_links": True,
+    # Look for a newer build on the repository's Releases when the window opens; skip_build is one the user said no to.
+    "check_updates": True,
+    "skip_build": 0,
     # Put on each decision, so maintainers sharing the file can see who made it.
     "your_name": "",
     "theme": "system",  # "system", "light" or "dark"

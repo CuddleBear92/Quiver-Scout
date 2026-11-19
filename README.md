@@ -40,7 +40,17 @@ Projects are matched by repository, whatever form the link takes: `https://GitHu
 `github.com/owner/repo/releases/tag/v1` and `http://www.github.com/owner/repo/` are the same project. GitLab
 subgroups, Codeberg and other Gitea/Forgejo hosts, and project sites that aren't on a code host are handled too.
 
-## Run it
+## Download
+
+On Windows, download **QuiverScout.exe** from the
+[latest release](https://github.com/CuddleBear92/quiver-scout/releases/latest) and run it. Nothing to install, no
+Python needed. Windows SmartScreen may warn about an unknown publisher the first time: *More info → Run anyway*.
+
+It looks for a newer build each time it starts (and from **Help → Check for updates…**). When there is one, it shows
+what changed and offers to download it: it checks the download against the SHA-256 GitHub lists, swaps it in and
+restarts. Say no and it doesn't ask again until the build after. **Settings → API keys** can turn the check off.
+
+## Run it from source
 
 It needs Python 3.9 or later and nothing else. On Windows, the python.org installer includes Tkinter, which the
 window uses. On Linux you may need your distribution's `python3-tk` package.
@@ -301,6 +311,15 @@ again.
 Each site is a module in `quiver_scout/sources/` with a `fetch(ctx)` that returns `Item`s (a project URL, its name
 and game, its page on that site, and any dates it knows). `ctx.json(url)` downloads a file only when it changed. Add
 it to `EXTERNAL` in `sources/__init__.py` and to `_fetch_one` in `engine.py`.
+
+## Releases
+
+`.github/workflows/release.yml` makes a release every time `main` changes (and from **Actions → Build and release →
+Run workflow**): it runs the tests on Linux, builds `QuiverScout.exe` with PyInstaller on Windows, and publishes it as
+a release tagged `build-N`, N being the run number, one higher every time. The build number is stamped into the exe
+(`quiver_scout/_build.py`, which is 0 in the source), and that's what the app compares to tell when there's a newer
+one. The release notes are the merged branch's commit message. Changes to Markdown files and `docs/` alone don't
+make a release.
 
 ## Tests
 
