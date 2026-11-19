@@ -84,6 +84,34 @@ def open_folder(path: str) -> None:
         subprocess.Popen(["xdg-open", path])
 
 
+def screen_box(root: tk.Misc) -> tuple[int, int, int, int]:
+    """(left, top, right, bottom) of every monitor together. On Windows that's the virtual screen, which reaches left
+    of or above the main monitor when another sits there."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            m = ctypes.windll.user32.GetSystemMetrics
+            left, top = m(76), m(77)
+            return left, top, left + m(78), top + m(79)
+        except Exception:
+            pass
+    return 0, 0, root.winfo_vrootwidth() or root.winfo_screenwidth(), root.winfo_vrootheight() or root.winfo_screenheight()
+
+
+GEOMETRY = re.compile(r"^(?:(\d+)x(\d+))?([+-]-?\d+)([+-]-?\d+)$")
+
+
+def on_screen(root: tk.Misc, geometry: str) -> bool:
+    """Whether a saved "WxH+X+Y" (or "+X+Y") would put the window's top-left corner area on a monitor."""
+    m = GEOMETRY.match(geometry or "")
+    if not m:
+        return False
+    x, y = int(m.group(3)), int(m.group(4))
+    left, top, right, bottom = screen_box(root)
+    return left - 50 <= x <= right - 150 and top - 10 <= y <= bottom - 80
+
+
 def link_values(link: dict | None) -> dict:
     """The Link and Link checked columns for a link check result."""
     from .linkcheck import LABELS
@@ -416,8 +444,8 @@ class App:
         self._links = 0
 
         root.title("Quiver Scout")
-        root.geometry("1440x860")
         root.minsize(960, 520)
+        self._restore_window()
         self.c = theme.apply(root, store.settings.get("theme", "system"))
         self._menu()
         self._layout()
@@ -443,10 +471,14 @@ class App:
         f.add_command(label="Export every project as CSV…", command=self.export_all)
         f.add_command(label="Export Quiver catalog as CSV…", command=self.export_quiver)
         f.add_separator()
+        f.add_command(label="Import decisions or taken-down list…", command=self.import_shared)
+        f.add_command(label="Export decisions…", command=lambda: self.export_shared("decisions"))
+        f.add_command(label="Export taken-down list…", command=lambda: self.export_shared("taken-down"))
+        f.add_separator()
         f.add_command(label="Settings…", command=self.settings_dialog)
         f.add_command(label="Open data folder", command=lambda: open_folder(str(self.store.dir)))
         f.add_separator()
-        f.add_command(label="Quit", command=self.root.destroy)
+        f.add_command(label="Quit", command=self.quit)
         v = tk.Menu(self.root, tearoff=False)
         self.theme_var = tk.StringVar(value=self.store.settings.get("theme", "system"))
         for mode, label in (("system", "Theme: same as system"), ("light", "Theme: light"), ("dark", "Theme: dark")):
@@ -557,6 +589,64 @@ class App:
         self.tabs.add(logframe, text="Log")
         self.tabs.bind("<<NotebookTabChanged>>", lambda e: self._tab_changed())
         self._update_buttons()
+
+    # ---- window size and place ---------------------------------------------------------------------------------
+
+    def _restore_window(self) -> None:
+        saved = self.store.settings.get("window", {})
+        geometry = saved.get("main", "")
+        self.root.geometry(geometry if on_screen(self.root, geometry) else "1440x860")
+        if saved.get("main_zoomed"):
+            try:
+                self.root.state("zoomed")  # Windows, macOS
+            except tk.TclError:
+                try:
+                    self.root.attributes("-zoomed", True)  # Linux
+                except tk.TclError:
+                    pass
+        self._geometry_after = None
+        self.root.bind("<Configure>", self._window_moved, add="+")
+        self.root.protocol("WM_DELETE_WINDOW", self.quit)
+
+    def _zoomed(self) -> bool:
+        try:
+            if self.root.state() == "zoomed":
+                return True
+        except tk.TclError:
+            pass
+        try:
+            return bool(self.root.attributes("-zoomed"))
+        except tk.TclError:
+            return False
+
+    def _window_moved(self, event) -> None:
+        if event.widget is not self.root:
+            return
+        if self._geometry_after:
+            self.root.after_cancel(self._geometry_after)
+        self._geometry_after = self.root.after(600, self._save_window)
+
+    def _save_window(self) -> None:
+        """Keep the size and place it has when not maximized, and whether it's maximized."""
+        self._geometry_after = None
+        w = self.store.settings.setdefault("window", {})
+        zoomed = self._zoomed()
+        changed = w.get("main_zoomed") != zoomed
+        w["main_zoomed"] = zoomed
+        if not zoomed and self.root.state() == "normal":
+            geometry = self.root.geometry()
+            changed |= w.get("main") != geometry
+            w["main"] = geometry
+        if changed:
+            self.store.save_settings()
+
+    def quit(self) -> None:
+        if self._geometry_after:
+            self.root.after_cancel(self._geometry_after)
+        try:
+            self._save_window()
+        finally:
+            self.root.destroy()
 
     @staticmethod
     def _label(prefix: str, names: dict[str, str], variables: dict[str, tk.BooleanVar], what: str) -> str:
@@ -1307,12 +1397,53 @@ class App:
             n = engine.write_quiver_csv(path, self.result.quiver, self.result.links)
             self.status.config(text=f"Wrote {n} rows to {path}", style="TLabel")
 
+    def import_shared(self) -> None:
+        """Merge a decisions file or taken-down list someone sent into this computer's."""
+        path = filedialog.askopenfilename(parent=self.root, title="Import decisions or taken-down list",
+                                          filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            kind, counts = engine.import_file(self.store, path)
+        except (OSError, ValueError) as e:
+            messagebox.showerror("Import", f"Couldn't import it:\n\n{e}", parent=self.root)
+            return
+        what = "decisions" if kind == "decisions" else "taken-down links"
+        self.reload()
+        msg = (f"Imported {what} from {os.path.basename(path)}:\n\n"
+               f"{counts['added']} new, {counts['updated']} newer than yours (replaced yours), "
+               f"{counts['kept']} you already had or had newer (kept yours).")
+        self.log(msg.replace("\n\n", " "))
+        self.status.config(text=f"Imported {counts['added'] + counts['updated']} {what}.", style="TLabel")
+        messagebox.showinfo("Import", msg, parent=self.root)
+
+    def export_shared(self, which: str) -> None:
+        name = "decisions.json" if which == "decisions" else "taken-down.json"
+        path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".json", initialfile=name,
+                                            filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+        if path:
+            n = engine.export_file(self.store, which, path)
+            self.status.config(text=f"Wrote {n} entries to {path}", style="TLabel")
+
     def settings_dialog(self) -> None:
         s = self.store.settings
         w = tk.Toplevel(self.root)
         w.title("Settings")
         w.transient(self.root)
         w.resizable(False, False)
+        place = s.get("window", {}).get("settings", "")
+        if on_screen(self.root, place):
+            w.geometry(place)
+
+        def close() -> None:
+            pos = f"+{w.winfo_x()}+{w.winfo_y()}"
+            win = s.setdefault("window", {})
+            if win.get("settings") != pos:
+                win["settings"] = pos
+                self.store.save_settings()
+            w.destroy()
+
+        w.protocol("WM_DELETE_WINDOW", close)
         outer = ttk.Frame(w, padding=12)
         outer.pack(fill="both")
         tabs = ttk.Notebook(outer)
@@ -1418,13 +1549,13 @@ class App:
             s["your_name"] = name_var.get().strip()
             self.store.save_settings()
             self.store.save_tokens({k: v.get() for k, v in token_vars.items()})
-            w.destroy()
+            close()
             self.reload()
             self.status.config(text="Settings saved. Refresh (F5) to read the sites with them.", style="TLabel")
 
         buttons = ttk.Frame(outer)
         buttons.pack(fill="x", pady=(12, 0))
-        ttk.Button(buttons, text="Cancel", command=w.destroy).pack(side="right")
+        ttk.Button(buttons, text="Cancel", command=close).pack(side="right")
         ttk.Button(buttons, text="Save", style="Accent.TButton", command=save).pack(side="right", padx=6)
         theme.dark_title_bar(w, self.c["dark"])
         w.grab_set()

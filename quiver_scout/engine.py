@@ -362,6 +362,42 @@ def compare(store: Store) -> Comparison:
     )
 
 
+def import_file(store: Store, path: str) -> tuple[str, dict[str, int]]:
+    """Merge a decisions file or a taken-down list someone sent into this computer's. Tells which it was by what's in
+    it. Returns ("decisions" | "taken-down", counts of added, updated and kept)."""
+    import json as _json
+
+    with open(path, encoding="utf-8") as f:
+        data = _json.load(f)
+    if isinstance(data, dict) and isinstance(data.get("decisions"), dict):
+        return "decisions", store.decisions.merge(data["decisions"])
+    if isinstance(data, dict) and isinstance(data.get("links"), dict):
+        return "taken-down", store.taken_down.merge(data["links"])
+    if isinstance(data, dict) and data and all(isinstance(v, dict) and "url" in v for v in data.values()):
+        # Version 0.1's blacklist.json: key -> {title, game, url, reason, date}.
+        from .decisions import BLACKLIST as _B
+        old = {k: {**{x: y for x, y in v.items() if x != "reason"}, "list": _B, "note": v.get("reason", "")}
+               for k, v in data.items()}
+        return "decisions", store.decisions.merge(old)
+    raise ValueError(f"{path} isn't a decisions file or a taken-down list")
+
+
+def export_file(store: Store, which: str, path: str) -> int:
+    """Save a copy of the decisions file or the taken-down list, to send to someone. Returns how many entries."""
+    import shutil
+
+    if which == "decisions":
+        store.decisions.reload()
+        source, count = store.decisions.path, len(store.decisions.entries)
+    else:
+        store.taken_down.reload()
+        source, count = store.taken_down.path, len(store.taken_down.entries)
+    if not source.exists():
+        (store.decisions if which == "decisions" else store.taken_down)._write()
+    shutil.copyfile(source, path)
+    return count
+
+
 def decide(store: Store, which: str, candidates: list[Candidate], reason: str = "", note: str = "") -> None:
     store.decisions.set(which, [{"key": c.key, "title": c.title, "game": c.game, "url": c.url} for c in candidates],
                         reason=reason, note=note, by=store.settings.get("your_name", ""))

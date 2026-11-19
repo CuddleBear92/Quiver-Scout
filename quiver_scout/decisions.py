@@ -97,6 +97,28 @@ class Decisions:
             self.entries[p["key"]] = entry
         self._write()
 
+    def merge(self, incoming: dict[str, dict]) -> dict[str, int]:
+        """Take in another maintainer's decisions: new projects are added, and a project both have keeps whichever
+        decision is newer (yours when they're from the same day). Returns counts: added, updated, kept."""
+        self._mtime = None
+        self.reload()
+        counts = {"added": 0, "updated": 0, "kept": 0}
+        for key, theirs in incoming.items():
+            if not isinstance(theirs, dict) or theirs.get("list") not in (WAITING, BLACKLIST):
+                continue
+            mine = self.entries.get(key)
+            if not mine:
+                self.entries[key] = theirs
+                counts["added"] += 1
+            elif theirs.get("date", "") > mine.get("date", "") and theirs != mine:
+                self.entries[key] = theirs
+                counts["updated"] += 1
+            else:
+                counts["kept"] += 1
+        if counts["added"] or counts["updated"]:
+            self._write()
+        return counts
+
     def remove(self, keys: list[str]) -> None:
         self._mtime = None
         self.reload()
