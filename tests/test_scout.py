@@ -7,7 +7,7 @@ from unittest import mock
 
 from quiver_scout import engine, forges, linkcheck, names, net, replacements
 from quiver_scout.takendown import TakenDown
-from quiver_scout.decisions import BLACKLIST, WAITING, Decisions
+from quiver_scout.decisions import BLACKLIST, BLACKLIST_REASONS, WAITING, Decisions, reason_label
 from quiver_scout.sources import (Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
                                   recomplauncher, trilarion, unbaked)
 from quiver_scout.sources.base import day
@@ -670,6 +670,22 @@ class Compare(unittest.TestCase):
         self.assertEqual(by["github.com/y/other-mm"].same_app, [])  # only the same game
         self.assertEqual([q.slug for q in by["github.com/y/other-mm"].same_game], ["z"])
         self.assertEqual(by["github.com/z/recomp"].same_app, [])  # names too common to tell apps apart
+
+
+    def test_blacklist_reasons(self):
+        self.put([Item("playported", "https://github.com/x/a", "A"), Item("playported", "https://github.com/x/b", "B")])
+        r = engine.compare(self.store)
+        engine.decide(self.store, BLACKLIST, r.missing[:1], reason="official", note="Steam version is fine")
+        engine.decide(self.store, BLACKLIST, r.missing[1:], note="no reason picked")
+        a, b = self.store.decisions.get("github.com/x/a"), self.store.decisions.get("github.com/x/b")
+        self.assertEqual((reason_label(a), a["note"]), ("Decent official PC port available", "Steam version is fine"))
+        self.assertEqual(reason_label(b), "")  # a note alone, as before
+        self.assertEqual(reason_label({"list": WAITING, "reason": "release"}), "No release file yet")
+        out = Path(self.tmp.name) / "b.csv"
+        engine.write_candidates_csv(str(out), engine.compare(self.store).decided(BLACKLIST))
+        with out.open() as f:
+            rows = {r["title"]: r for r in csv.DictReader(f)}
+        self.assertEqual(rows["A"]["reason"], BLACKLIST_REASONS["official"])
 
 
     def test_csv_exports(self):
