@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quiver-scout"
+dynamic = ["version"]
+description = "Find recomps and ports listed on other sites that Quiver Launcher doesn't have yet."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+quiver-scout = "quiver_scout.cli:main"
+
+[project.gui-scripts]
+quiver-scout-gui = "quiver_scout.gui:run"
+
+[tool.setuptools.dynamic]
+version = { attr = "quiver_scout.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["quiver_scout*"]

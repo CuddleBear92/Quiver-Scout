@@ -1,0 +1,80 @@
+{
+ "weeks": [
+  {
+   "week": "2026-11-16",
+   "projects": 841,
+   "games_newly_opened": 323,
+   "games": [
+    {
+     "game": "passage",
+     "title": "Passage",
+     "platform": "PC",
+     "year": null,
+     "newly_opened": true,
+     "added": "2026-11-17",
+     "url": "https://unbaked.games/games/passage/",
+     "json": "https://unbaked.games/api/games/passage.json",
+     "projects": [
+      {
+       "name": "Passage for Android",
+       "url": "https://github.com/judooochp/Passage_Android",
+       "methods": [
+        "Source port"
+       ],
+       "toolchain": "C++, SDL2 2.32.10, CMake, Android NDK",
+       "stars": null,
+       "added": "2026-11-17",
+       "also_covers_games": null
+      }
+     ]
+    },
+    {
+     "game": "unreal-ii-the-awakening",
+     "title": "Unreal II: The Awakening",
+     "platform": "PC",
+     "year": 2003,
+     "newly_opened": true,
+     "added": "2026-11-17",
+     "url": "https://unbaked.games/games/unreal-ii-the-awakening/",
+     "json": "https://unbaked.games/api/games/unreal-ii-the-awakening.json",
+     "projects": [
+      {
+       "name": "Unreal II Recompiled (Unreal II Enhanced)",
+       "url": "https://github.com/thekojac304/unreal2-recompiled",
+       "methods": [
+        "Static recomp"
+       ],
+       "toolchain": "xlift.py x86-to-C translator, MSVC/clang-cl x64, custom runtime, DXVK\u2026",
+       "stars": null,
+       "added": "2026-11-17",
+       "also_covers_games": null
+      }
+     ]
+    },
+    {
+     "game": "tribes-2",
+     "title": "Tribes 2",
+     "platform": "PC",
+     "year": 2001,
+     "newly_opened": true,
+     "added": "2026-11-17",
+     "url": "https://unbaked.games/games/tribes-2/",
+     "json": "https://unbaked.games/api/games/tribes-2.json",
+     "projects": [
+      {
+       "name": "Tribes 2 Static Recompilation",
+       "url": "https://github.com/sp00nznet/tribes2-recomp",
+       "methods": [
+        "Static recomp"
+       ],
+       "toolchain": "pcrecomp, C, CMake, OpenGL",
+       "stars": null,
+       "added": "2026-11-17",
+       "also_covers_games": null
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

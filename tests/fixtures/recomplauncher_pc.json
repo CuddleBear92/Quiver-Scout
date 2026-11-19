@@ -1,0 +1,748 @@
+{
+ "apps": [
+  {
+   "id": "zelda64recomp",
+   "name": "Zelda 64: Recompiled",
+   "game": "The Legend of Zelda: Majora's Mask",
+   "origin": "n64",
+   "order": 0,
+   "repo": "Zelda64Recomp/Zelda64Recomp",
+   "version": "1.2.2",
+   "released": "2025-08-27",
+   "size": "28 MB",
+   "downloads": 402541,
+   "stars": 7738,
+   "blurb": "Majora's Mask as a native PC game: widescreen, high frame rates, mods and modern controls.",
+   "adds": "",
+   "description": "",
+   "needs": "Your own copy of The Legend of Zelda: Majora's Mask",
+   "credits": "",
+   "author": "Zelda64Recomp",
+   "icon": "https://recompstore.com/media/pc-zelda64recomp-icon-8be094b6.png",
+   "cover": "https://recompstore.com/media/pc-zelda64recomp-cover-3c1c37be.jpg",
+   "hero": "https://recompstore.com/media/pc-zelda64recomp-hero_web-3ffc0b23.jpg",
+   "logo": "https://recompstore.com/media/pc-zelda64recomp-logo-3fbf28fa.png",
+   "systems": [
+    "windows",
+    "linux",
+    "macos"
+   ],
+   "assets": {
+    "windows": "Zelda64Recompiled-*-Windows.zip",
+    "linux": "Zelda64Recompiled-*-Linux-X64.zip",
+    "macos": "Zelda64Recompiled-*-macOS.zip"
+   },
+   "tags": [
+    "High FPS",
+    "Widescreen",
+    "Gyro",
+    "Mods",
+    "HD Textures"
+   ],
+   "added": "2026-10-26",
+   "features": [
+    "High frame rate support",
+    "Widescreen and ultrawide",
+    "Gyro aiming",
+    "Mods and texture packs",
+    "Original N64 effects intact"
+   ],
+   "license": "GPL-3.0",
+   "genre": "adventure",
+   "media": [],
+   "issues": 143,
+   "releases": 7,
+   "first": "2024-05-10",
+   "players": 533,
+   "handheld": {
+    "ok": true,
+    "devices": [
+     "Steam Deck"
+    ],
+    "n": 5
+   },
+   "tag": "v1.2.2",
+   "files": {
+    "macos": {
+     "name": "Zelda64Recompiled-v1.2.2-macOS.zip",
+     "sha256": "f369815d7ba2a1139a6fab8a0aa51c52e5f064dcfcce649eb888fdef9f648689",
+     "scan": "green"
+    }
+   },
+   "about": {
+    "igdb": 1030,
+    "url": "https://www.igdb.com/games/the-legend-of-zelda-majora-s-mask",
+    "name": "The Legend of Zelda: Majora's Mask",
+    "released": "2000-04-27",
+    "developer": "Nintendo EAD Software Development Group No.3",
+    "publisher": "Nintendo, Gradiente",
+    "genres": [
+     "Puzzle",
+     "Adventure"
+    ],
+    "modes": [
+     "Single player"
+    ],
+    "platforms": [
+     "Wii",
+     "Nintendo 64",
+     "64DD",
+     "Wii U"
+    ],
+    "series": "The Legend of Zelda",
+    "rating": 88,
+    "summary": "The Legend of Zelda: Majora's Mask is a direct sequel to Ocarina of Time, it utilizes the same engine and visual style as its predecessor. The game retains the traditional elements of Zelda games as well as those introduced in Ocarina of Time, such as active blocking with a shield, various throwing items, and the usage of melodies played on the ocarina to solve puzzles. Compared to the previous Zelda games, this installment is more oriented towards interaction with NPCs and has a larger variety of items, optional quests, and mini-games. It also includes a time system that spans three days, and this cycle must be reset periodically to progress through the game."
+   },
+   "boot": {
+    "kind": "portable",
+    "start": "Zelda64Recompiled.exe",
+    "start_is": "game",
+    "files": {
+     "how": "self",
+     "accepts": "file",
+     "what": "Your Majora's Mask ROM: the North American N64 version. Pick it in the game's main menu the first time."
+    },
+    "settings": {
+     "config": [
+      {
+       "id": "graphics",
+       "format": "json",
+       "file": [
+        {
+         "path": "{install}/graphics.json",
+         "if": "{install}/portable.txt"
+        },
+        {
+         "path": "{local}/Zelda64Recompiled/graphics.json"
+        }
+       ]
+      }
+     ],
+     "settings": [
+      {
+       "id": "resolution",
+       "label": "Resolution",
+       "help": "How sharp the 3D picture is drawn.",
+       "choices": [
+        {
+         "label": "Match the window",
+         "set": {
+          "res_option": "\"Auto\""
+         }
+        },
+        {
+         "label": "240p (original)",
+         "set": {
+          "res_option": "\"Original\""
+         }
+        },
+        {
+         "label": "480p",
+         "set": {
+          "res_option": "\"Original2x\""
+         }
+        }
+       ],
+       "defaults": {
+        "res_option": "\"Auto\""
+       },
+       "in": "graphics"
+      },
+      {
+       "id": "window",
+       "label": "Window mode",
+       "help": "",
+       "choices": [
+        {
+         "label": "Windowed",
+         "set": {
+          "wm_option": "\"Windowed\""
+         }
+        },
+        {
+         "label": "Full screen",
+         "set": {
+          "wm_option": "\"Fullscreen\""
+         }
+        }
+       ],
+       "defaults": {
+        "wm_option": "\"Windowed\""
+       },
+       "in": "graphics"
+      },
+      {
+       "id": "aspect",
+       "label": "Screen shape",
+       "help": "Widescreen fills the window instead of the original 4:3 picture.",
+       "choices": [
+        {
+         "label": "Widescreen",
+         "set": {
+          "ar_option": "\"Expand\""
+         }
+        },
+        {
+         "label": "Original (4:3)",
+         "set": {
+          "ar_option": "\"Original\""
+         }
+        }
+       ],
+       "defaults": {
+        "ar_option": "\"Expand\""
+       },
+       "in": "graphics"
+      },
+      {
+       "id": "msaa",
+       "label": "Anti-aliasing",
+       "help": "Smoother edges, at some cost to speed.",
+       "choices": [
+        {
+         "label": "Off",
+         "set": {
+          "msaa_option": "\"None\""
+         }
+        },
+        {
+         "label": "2x",
+         "set": {
+          "msaa_option": "\"MSAA2X\""
+         }
+        },
+        {
+         "label": "4x",
+         "set": {
+          "msaa_option": "\"MSAA4X\""
+         }
+        }
+       ],
+       "defaults": {
+        "msaa_option": "\"MSAA2X\""
+       },
+       "in": "graphics"
+      },
+      {
+       "id": "fps",
+       "label": "Frame rate",
+       "help": "Match your monitor for smoother motion, or keep the console's own rate.",
+       "choices": [
+        {
+         "label": "Monitor's refresh rate",
+         "set": {
+          "rr_option": "\"Display\""
+         }
+        },
+        {
+         "label": "Original",
+         "set": {
+          "rr_option": "\"Original\""
+         }
+        }
+       ],
+       "defaults": {
+        "rr_option": "\"Display\""
+       },
+       "in": "graphics"
+      },
+      {
+       "id": "hud",
+       "label": "HUD placement",
+       "help": "Where the on-screen info sits on wide screens.",
+       "choices": [
+        {
+         "label": "16:9",
+         "set": {
+          "hr_option": "\"Clamp16x9\""
+         }
+        },
+        {
+         "label": "Original (4:3)",
+         "set": {
+          "hr_option": "\"Original\""
+         }
+        },
+        {
+         "label": "Edges of the window",
+         "set": {
+          "hr_option": "\"Full\""
+         }
+        }
+       ],
+       "defaults": {
+        "hr_option": "\"Clamp16x9\""
+       },
+       "in": "graphics"
+      }
+     ]
+    }
+   },
+   "support": {
+    "sdk": "none",
+    "settings": "launcher"
+   },
+   "title": "the-legend-of-zelda-majora-s-mask"
+  },
+  {
+   "id": "007eon-recomp",
+   "name": "007: Everything or Nothing - XBE Recomp",
+   "game": "007: Everything or Nothing",
+   "origin": "xbox",
+   "order": 311,
+   "repo": "hk21x/007eon-recomp",
+   "version": "1.3.2",
+   "released": "2026-11-15",
+   "size": "2 MB",
+   "downloads": 10204,
+   "stars": 109,
+   "blurb": "A native PC port of the Xbox version of 007: Everything or Nothing, with widescreen, mouse aiming and 60 fps driving missions.",
+   "adds": "",
+   "description": "",
+   "needs": "Your own copy of 007: Everything or Nothing for the original Xbox (Europe PAL or USA), as a disc image (.iso) or its files",
+   "credits": "",
+   "author": "hk21x",
+   "icon": "https://recompstore.com/media/pc-007eon-recomp-icon-af3e23ab.png",
+   "cover": "https://recompstore.com/media/pc-007eon-recomp-cover-3655e2ef.jpg",
+   "hero": "https://recompstore.com/media/pc-007eon-recomp-hero_web-eacec881.jpg",
+   "logo": "https://recompstore.com/media/pc-007eon-recomp-logo-44ee13e2.png",
+   "systems": [
+    "windows"
+   ],
+   "assets": {
+    "windows": "EoNLauncher.exe"
+   },
+   "tags": [
+    "Keyboard & Mouse",
+    "Widescreen",
+    "Controller Support"
+   ],
+   "added": "2026-10-30T17:24:37Z",
+   "features": [
+    "Keyboard and mouse free aim",
+    "Ultrawide 21:9 and wider",
+    "16:9 widescreen",
+    "Any monitor resolution",
+    "Remappable controls"
+   ],
+   "license": "MIT",
+   "genre": "action",
+   "media": [],
+   "issues": 7,
+   "releases": 8,
+   "first": "2026-10-26",
+   "players": 110,
+   "tag": "v1.3.2",
+   "files": {
+    "windows": {
+     "name": "EoNLauncher.exe",
+     "sha256": "7a42e6d2bae65a828c6bf69e4b365f583268b50b29729f95e2de1c7c1c85448c",
+     "scan": "green"
+    }
+   },
+   "about": {
+    "igdb": 1644,
+    "url": "https://www.igdb.com/games/james-bond-007-everything-or-nothing",
+    "name": "James Bond 007: Everything or Nothing",
+    "released": "2004-02-11",
+    "developer": "EA Redwood Shores",
+    "publisher": "Electronic Arts",
+    "genres": [
+     "Shooter",
+     "Adventure"
+    ],
+    "modes": [
+     "Single player",
+     "Co-operative",
+     "Split screen"
+    ],
+    "platforms": [
+     "Xbox",
+     "Nintendo GameCube",
+     "PlayStation 2"
+    ],
+    "series": "James Bond",
+    "rating": 77,
+    "summary": "Returning as James Bond is Pierce Brosnan, who will lend his cyberscanned likeness and voice to the character. The rest of the cast will include new Bond girls (Shannon Elizabeth and Heidi Klum) as well as old and new Bond villains. The original script will take players through exciting locales in four continents including the Valley of the Kings in Egypt and the French Quarter in New Orleans."
+   },
+   "ai": {
+    "uses": [
+     "code"
+    ],
+    "by": "store"
+   },
+   "boot": {
+    "kind": "single-exe",
+    "start": "EoNLauncher.exe",
+    "start_is": "launcher",
+    "files": {
+     "how": "self",
+     "accepts": "folder or iso",
+     "contains": [
+      "default.xbe",
+      "driving.xbe"
+     ],
+     "id": "45410042",
+     "what": "Your 007: Everything or Nothing Xbox disc image (.iso) or its files, Europe or USA"
+    },
+    "player_note": "On first start, choose your disc in the port's launcher and press Build. The build needs internet and about 15 GB, and takes 30 to 90 minutes once; then press Play.",
+    "settings": {
+     "made_on_first_start": true,
+     "config": [
+      {
+       "id": "main",
+       "format": "toml",
+       "file": [
+        {
+         "path": "{install}/EoN/play/settings.toml"
+        }
+       ]
+      }
+     ],
+     "settings": [
+      {
+       "id": "display",
+       "label": "Display",
+       "help": "",
+       "choices": [
+        {
+         "label": "Full Screen",
+         "set": {
+          "display_mode": "\"fullscreen\""
+         }
+        },
+        {
+         "label": "Borderless",
+         "set": {
+          "display_mode": "\"borderless\""
+         }
+        },
+        {
+         "label": "Window",
+         "set": {
+          "display_mode": "\"windowed\""
+         }
+        }
+       ],
+       "defaults": {
+        "display_mode": "\"borderless\""
+       }
+      },
+      {
+       "id": "render",
+       "label": "Render Scale",
+       "help": "How sharp the game draws, compared to the screen.",
+       "choices": [
+        {
+         "label": "50%",
+         "set": {
+          "render_percent": "50"
+         }
+        },
+        {
+         "label": "75%",
+         "set": {
+          "render_percent": "75"
+         }
+        },
+        {
+         "label": "100%",
+         "set": {
+          "render_percent": "100"
+         }
+        },
+        {
+         "label": "150%",
+         "set": {
+          "render_percent": "150"
+         }
+        },
+        {
+         "label": "200%",
+         "set": {
+          "render_percent": "200"
+         }
+        }
+       ],
+       "defaults": {
+        "render_percent": "100"
+       }
+      },
+      {
+       "id": "fps",
+       "label": "Frame Rate Cap",
+       "help": "",
+       "choices": [
+        {
+         "label": "30 fps",
+         "set": {
+          "fps_cap": "30"
+         }
+        },
+        {
+         "label": "60 fps",
+         "set": {
+          "fps_cap": "60"
+         }
+        },
+        {
+         "label": "120 fps",
+         "set": {
+          "fps_cap": "120"
+         }
+        },
+        {
+         "label": "144 fps",
+         "set": {
+          "fps_cap": "144"
+         }
+        },
+        {
+         "label": "240 fps",
+         "set": {
+          "fps_cap": "240"
+         }
+        },
+        {
+         "label": "No Cap",
+         "set": {
+          "fps_cap": "0"
+         }
+        }
+       ],
+       "defaults": {
+        "fps_cap": "60"
+       }
+      },
+      {
+       "id": "vsync",
+       "label": "V-Sync",
+       "help": "Stops screen tearing.",
+       "choices": [
+        {
+         "label": "Off",
+         "set": {
+          "vsync": "false"
+         }
+        },
+        {
+         "label": "On",
+         "set": {
+          "vsync": "true"
+         }
+        }
+       ],
+       "defaults": {
+        "vsync": "true"
+       }
+      },
+      {
+       "id": "aa",
+       "label": "Anti-Aliasing",
+       "help": "Smooths jagged edges.",
+       "choices": [
+        {
+         "label": "Off",
+         "set": {
+          "antialiasing": "\"off\""
+         }
+        },
+        {
+         "label": "FXAA",
+         "set": {
+          "antialiasing": "\"fxaa\""
+         }
+        },
+        {
+         "label": "MSAA 2x",
+         "set": {
+          "antialiasing": "\"msaa2\""
+         }
+        },
+        {
+         "label": "MSAA 4x",
+         "set": {
+          "antialiasing": "\"msaa4\""
+         }
+        },
+        {
+         "label": "MSAA 8x",
+         "set": {
+          "antialiasing": "\"msaa8\""
+         }
+        }
+       ],
+       "defaults": {
+        "antialiasing": "\"off\""
+       }
+      },
+      {
+       "id": "intro",
+       "label": "Skip Intro",
+       "help": "Starts without the logo movies.",
+       "choices": [
+        {
+         "label": "Off",
+         "set": {
+          "skip_intro": "false"
+         }
+        },
+        {
+         "label": "On",
+         "set": {
+          "skip_intro": "true"
+         }
+        }
+       ],
+       "defaults": {
+        "skip_intro": "false"
+       }
+      }
+     ]
+    }
+   },
+   "support": {
+    "sdk": "unknown",
+    "settings": "launcher",
+    "verified": "launcher"
+   }
+  },
+  {
+   "id": "engage-pc-recomp",
+   "name": "Fire Emblem Engage Recomp",
+   "game": "Fire Emblem Engage",
+   "origin": "switch",
+   "order": 711,
+   "repo": "engage-pc-recomp/engage-pc-recomp",
+   "version": "engage-v0.1.0-alpha.6",
+   "released": "2026-11-04",
+   "size": "",
+   "downloads": 0,
+   "stars": 27,
+   "blurb": "Experimental native Windows port of Fire Emblem Engage 2.0.0. Build locally from your own files; no game data included.",
+   "adds": "",
+   "description": "",
+   "needs": "Your own copy of Fire Emblem Engage 2",
+   "credits": "",
+   "author": "engage-pc-recomp",
+   "icon": "https://recompstore.com/media/pc-engage-pc-recomp-icon-9759619b.png",
+   "cover": "https://recompstore.com/media/pc-engage-pc-recomp-cover-6f1eda8c.jpg",
+   "hero": "https://recompstore.com/media/pc-engage-pc-recomp-hero_web-3be089a1.jpg",
+   "logo": "https://recompstore.com/media/pc-engage-pc-recomp-logo-8457b515.png",
+   "systems": [
+    "windows"
+   ],
+   "assets": {
+    "windows": "Engage-Setup-*-windows.zip"
+   },
+   "tags": [],
+   "added": "2026-11-05T21:09:46Z",
+   "features": [],
+   "license": "MIT",
+   "genre": "other",
+   "media": [],
+   "issues": 0,
+   "releases": 5,
+   "first": "2026-11-02",
+   "players": 70,
+   "host": "gitlab",
+   "tag": "engage-v0.1.0-alpha.6",
+   "files": {
+    "windows": {
+     "name": "Engage-Setup-0.1.0-alpha.6-windows.zip",
+     "sha256": "c0c8e62f6bbafda8ef255e44efb90097ef9599d614f8c8cbbd887f42f50772c4",
+     "scan": "green"
+    }
+   },
+   "about": {
+    "igdb": 217550,
+    "url": "https://www.igdb.com/games/fire-emblem-engage",
+    "name": "Fire Emblem Engage",
+    "released": "2023-01-20",
+    "developer": "Intelligent Systems",
+    "publisher": "Nintendo",
+    "genres": [
+     "Role-playing (RPG)",
+     "Strategy",
+     "Turn-based strategy (TBS)",
+     "Tactical"
+    ],
+    "modes": [
+     "Single player"
+    ],
+    "platforms": [
+     "Nintendo Switch"
+    ],
+    "series": "Fire Emblem",
+    "rating": 82,
+    "summary": "Become the Divine Dragon and save the continent of Elyos! Summon valiant heroes like Marth & Celica alongside a new cast of characters and engage in turn-based, tactical combat against a great evil in this new Fire Emblem story."
+   },
+   "support": {
+    "sdk": "none"
+   }
+  },
+  {
+   "id": "ultimate-alliance-3-native-pc-port",
+   "name": "Ultimate Alliance 3 Native PC Port",
+   "game": "Marvel Ultimate Alliance 3: The Black Order",
+   "origin": "switch",
+   "order": 1403,
+   "repo": "",
+   "version": "",
+   "released": "",
+   "size": "",
+   "downloads": 0,
+   "stars": 0,
+   "blurb": "A native PC port of Marvel Ultimate Alliance 3 in the works, by Fraudware.",
+   "adds": "",
+   "description": "",
+   "needs": "",
+   "credits": "",
+   "author": "Fraudware",
+   "icon": "https://recompstore.com/media/pc-marvel-ultimate-alliance-3-recomp-icon-9ef6100c.png",
+   "cover": "https://recompstore.com/media/pc-ultimate-alliance-3-native-pc-port-cover-defc86e0.jpg",
+   "hero": "https://recompstore.com/media/pc-ultimate-alliance-3-native-pc-port-hero_web-646e6cdb.jpg",
+   "logo": "https://recompstore.com/media/pc-ultimate-alliance-3-native-pc-port-logo-304a554b.png",
+   "systems": [],
+   "assets": [],
+   "tags": [],
+   "added": "2026-11-09",
+   "features": [],
+   "license": "",
+   "genre": "action",
+   "media": [],
+   "issues": 0,
+   "releases": 0,
+   "first": "",
+   "follow": "https://x.com/fraudwaremods/status/2118043675767042472",
+   "soon": true,
+   "about": {
+    "igdb": 113109,
+    "url": "https://www.igdb.com/games/marvel-ultimate-alliance-3-the-black-order",
+    "name": "Marvel Ultimate Alliance 3: The Black Order",
+    "released": "2019-07-19",
+    "developer": "Team NINJA, Koei Tecmo Games",
+    "publisher": "Nintendo",
+    "genres": [
+     "Role-playing (RPG)",
+     "Hack and slash/Beat 'em up"
+    ],
+    "modes": [
+     "Single player",
+     "Multiplayer",
+     "Co-operative"
+    ],
+    "platforms": [
+     "Nintendo Switch"
+    ],
+    "series": "Marvel",
+    "rating": 70,
+    "summary": "Assemble your ultimate team of Marvel Super Heroes from a huge cast including the Avengers, the Guardians of the Galaxy, the X-Men, and more! Team up with friends to prevent galactic devastation at the hands of the mad cosmic tyrant Thanos and his ruthless warmasters, The Black Order."
+   },
+   "support": {
+    "sdk": "unknown"
+   },
+   "title": "marvel-ultimate-alliance-3-the-black-order"
+  }
+ ]
+}
