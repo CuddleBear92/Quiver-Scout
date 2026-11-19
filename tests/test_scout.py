@@ -542,6 +542,32 @@ class Compare(unittest.TestCase):
         self.assertEqual(([c.title for c in r.missing], [c.title for c in r.other_sites]), (["CB"], ["BB"]))
 
 
+    def test_import_merges_newer_and_keeps_yours(self):
+        self.store.decisions.set(WAITING, [{"key": "github.com/a/mine", "title": "Mine"}], reason="release")
+        self.store.decisions.entries["github.com/a/both"] = {"list": BLACKLIST, "title": "Both", "date": "2026-11-10"}
+        self.store.decisions._write()
+        theirs = {"version": 1, "decisions": {
+            "github.com/a/new": {"list": WAITING, "title": "New", "date": "2026-11-01", "reason": "host"},
+            "github.com/a/both": {"list": WAITING, "title": "Both", "date": "2026-11-15", "reason": "source"},
+            "github.com/a/mine": {"list": BLACKLIST, "title": "Mine", "date": "2026-01-01"}}}
+        path = Path(self.tmp.name) / "sent.json"
+        path.write_text(json.dumps(theirs))
+        kind, counts = engine.import_file(self.store, str(path))
+        self.assertEqual((kind, counts), ("decisions", {"added": 1, "updated": 1, "kept": 1}))
+        d = self.store.decisions.entries
+        self.assertEqual((d["github.com/a/both"]["list"], d["github.com/a/mine"]["list"]), (WAITING, WAITING))
+
+        path.write_text(json.dumps({"version": 1, "links": {"github.com/x/y": {"status": "gone", "checked": "2026-11-19"},
+                                                            "github.com/x/z": {"status": "ok", "checked": "2026-11-19"}}}))
+        self.assertEqual(engine.import_file(self.store, str(path)), ("taken-down", {"added": 1, "updated": 0, "kept": 0}))
+        out = Path(self.tmp.name) / "copy.json"
+        self.assertEqual(engine.export_file(self.store, "taken-down", str(out)), 1)
+        self.assertIn("github.com/x/y", json.loads(out.read_text())["links"])
+        path.write_text("[1, 2]")
+        with self.assertRaises(ValueError):
+            engine.import_file(self.store, str(path))
+
+
     def test_csv_exports(self):
         self.put([Item("quiver", "https://github.com/a/b", "AB", game="G", slug="ab", released="2026-01-02"),
                   Item("unbaked", "https://github.com/c/d", "CD")])

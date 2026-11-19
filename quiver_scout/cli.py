@@ -33,6 +33,12 @@ def main(argv: list[str] | None = None) -> int:
     lc = sub.add_parser("check-links", help="check which projects' links are taken down, moved or archived")
     lc.add_argument("--all", action="store_true", help="every link again, not only new ones and ones due a check")
 
+    im = sub.add_parser("import", help="merge a decisions file or taken-down list someone sent into yours")
+    im.add_argument("file")
+    ex = sub.add_parser("export", help="save a copy of your decisions or taken-down list, to send to someone")
+    ex.add_argument("which", choices=("decisions", "taken-down"))
+    ex.add_argument("output")
+
     m = sub.add_parser("missing", help="write a list of projects to a CSV file (default: those Quiver is missing)")
     m.add_argument("output", nargs="?", default="missing.csv")
     m.add_argument("--list", choices=LISTS, default="missing",
@@ -56,6 +62,16 @@ def main(argv: list[str] | None = None) -> int:
             items = quiver.fetch(Context(store, _progress), cache=store.pages("quiver"))
         n = engine.write_quiver_csv(a.output, items)
         print(f"Wrote {n} Quiver apps to {a.output}")
+        return 0
+
+    if a.command == "import":
+        kind, counts = engine.import_file(store, a.file)
+        print(f"Imported {kind}: {counts['added']} new, {counts['updated']} replaced yours (newer), "
+              f"{counts['kept']} kept yours")
+        return 0
+    if a.command == "export":
+        n = engine.export_file(store, a.which, a.output)
+        print(f"Wrote {n} entries to {a.output}")
         return 0
 
     if a.command == "check-links":

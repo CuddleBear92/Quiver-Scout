@@ -101,6 +101,9 @@ site says about it: its page there, the release it knows of,
 the last push, when it was listed, stars, and for Decomp Buddy which systems it publishes builds for (a project with
 no builds is likely one to wait for).
 
+The window opens where you left it, at the size you left it, maximized if it was; so does Settings. A place on a
+monitor that's no longer there is ignored.
+
 **View → Theme** switches between light, dark, and the system's setting. The menu bar and, on Windows, the title bar
 follow too. Alt+F, Alt+V and Alt+H open the menus.
 
@@ -181,6 +184,20 @@ Taken-down list**), merged the same way. A link someone else checked more recent
 of being checked again, so maintainers sharing it split the requests between them. Links found fine again are taken
 off it.
 
+### Sharing a file once: import and export
+
+Without a shared folder or repository, maintainers can send each other the files instead. **File → Export
+decisions…** and **File → Export taken-down list…** save a copy; **File → Import decisions or taken-down list…**
+merges a copy someone sent into yours (it tells which kind it is by what's in it, and takes version 0.1's
+`blacklist.json` too):
+
+- projects or links you don't have are added,
+- ones you both have keep whichever is newer (yours when they're from the same day),
+- nothing of yours is removed: a project someone took off their blacklist stays on yours.
+
+It reports how many were added, replaced and kept. The command line does the same with `import FILE` and
+`export decisions|taken-down FILE`.
+
 The database (`scout.db`) is a local cache: everyone keeps their own and a refresh rebuilds it. Don't put it in a
 synced folder.
 
@@ -228,7 +245,7 @@ the `QUIVER_SCOUT_HOME` environment variable puts it somewhere else.
 
 | File | What |
 | --- | --- |
-| `settings.json` | Options, sort orders and hidden columns |
+| `settings.json` | Options, sort orders, columns, and window sizes and places |
 | `decisions.json` | Waiting and Blacklist (shareable, see above) |
 | `taken-down.json` | Links found taken down or moved (shareable, see above) |
 | `tokens.json` | GitHub and GitLab tokens. Never share it. |

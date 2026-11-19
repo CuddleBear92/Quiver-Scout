@@ -63,6 +63,28 @@ class TakenDown:
             self._write()
         return changed
 
+    def merge(self, incoming: dict[str, dict]) -> dict[str, int]:
+        """Take in another maintainer's list: new links are added, and a link both have keeps whichever check is
+        newer. Returns counts: added, updated, kept."""
+        self._mtime = None
+        self.reload()
+        counts = {"added": 0, "updated": 0, "kept": 0}
+        for key, theirs in incoming.items():
+            if not isinstance(theirs, dict) or theirs.get("status") not in SHARED:
+                continue
+            mine = self.entries.get(key)
+            if not mine:
+                self.entries[key] = theirs
+                counts["added"] += 1
+            elif theirs.get("checked", "") > mine.get("checked", ""):
+                self.entries[key] = theirs
+                counts["updated"] += 1
+            else:
+                counts["kept"] += 1
+        if counts["added"] or counts["updated"]:
+            self._write()
+        return counts
+
     def _write(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=self.path.name, suffix=".tmp")
