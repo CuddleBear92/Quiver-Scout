@@ -123,3 +123,7 @@ in `engine.py`.
 ```bash
 python -m unittest discover -s tests
 ```
+
+## License
+
+[MIT](LICENSE)

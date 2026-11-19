@@ -8,6 +8,7 @@ dynamic = ["version"]
 description = "Find recomps and ports listed on other sites that Quiver Launcher doesn't have yet."
 readme = "README.md"
 requires-python = ">=3.9"
+license = { text = "MIT" }
 dependencies = []
 
 [project.scripts]
