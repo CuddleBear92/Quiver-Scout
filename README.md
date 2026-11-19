@@ -109,6 +109,7 @@ follow too. Alt+F, Alt+V and Alt+H open the menus.
 | F5 / Shift+F5 | Refresh what changed / full refresh |
 | Enter / double-click | Open the repository |
 | Ctrl+Enter | Open its pages on the listing sites |
+| Q | Open in Quiver: the app's page on quiverlauncher.com, or, for a project Quiver doesn't have, the pages of Quiver's apps for the same game |
 | Ctrl+C | Copy the selected rows' URLs |
 | W | Wait for it (on Waiting: change why) |
 | Delete | Blacklist (on Waiting and Blacklist: back to the list) |

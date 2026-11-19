@@ -13,13 +13,13 @@ LIGHT = {
     "bg": "#f3f3f5", "surface": "#ffffff", "raised": "#e9e9ed", "field": "#ffffff", "border": "#cfd0d6",
     "fg": "#1d1d1f", "muted": "#6b6b72", "dim": "#9a9aa0", "accent": "#2f6fde", "on_accent": "#ffffff",
     "select": "#cfe0ff", "on_select": "#0b1f44", "link": "#1a5fb4", "error": "#c8372b", "good": "#1b8a3e",
-    "stripe": "#f7f8fa",
+    "stripe": "#f0f1f4",
 }
 DARK = {
     "bg": "#1e1f22", "surface": "#2b2d31", "raised": "#35373c", "field": "#232428", "border": "#3d3f45",
     "fg": "#e3e3e6", "muted": "#9a9ca3", "dim": "#6f7178", "accent": "#5b8def", "on_accent": "#ffffff",
     "select": "#2f4a7a", "on_select": "#ffffff", "link": "#7fb2ff", "error": "#ff6b6b", "good": "#4cc274",
-    "stripe": "#26282c",
+    "stripe": "#33353a",
 }
 
 
