@@ -252,8 +252,7 @@ class App:
     # ---- layout --------------------------------------------------------------------------------------------------
 
     def _menu(self) -> None:
-        bar = tk.Menu(self.root)
-        f = tk.Menu(bar, tearoff=False)
+        f = tk.Menu(self.root, tearoff=False)
         f.add_command(label="Refresh", accelerator="F5", command=self.refresh)
         f.add_command(label="Full refresh (read everything again)", accelerator="Shift+F5",
                       command=lambda: self.refresh(full=True))
@@ -266,26 +265,37 @@ class App:
         f.add_command(label="Open data folder", command=lambda: open_folder(str(self.store.dir)))
         f.add_separator()
         f.add_command(label="Quit", command=self.root.destroy)
-        bar.add_cascade(label="File", menu=f)
-        v = tk.Menu(bar, tearoff=False)
+        v = tk.Menu(self.root, tearoff=False)
         self.theme_var = tk.StringVar(value=self.store.settings.get("theme", "system"))
         for mode, label in (("system", "Theme: same as system"), ("light", "Theme: light"), ("dark", "Theme: dark")):
             v.add_radiobutton(label=label, value=mode, variable=self.theme_var, command=self.set_theme)
         v.add_separator()
         v.add_command(label="Choose columns: right-click a column heading", state="disabled")
-        bar.add_cascade(label="View", menu=v)
-        h = tk.Menu(bar, tearoff=False)
+        h = tk.Menu(self.root, tearoff=False)
         h.add_command(label="Keyboard shortcuts", command=self.shortcuts)
         h.add_command(label="About", command=lambda: messagebox.showinfo(
             "Quiver Scout", f"Quiver Scout {__version__}\n\nFinds recomps and ports listed on other sites that "
             "Quiver Launcher doesn't have yet.\n\nData folder:\n" + str(self.store.dir)
             + "\n\nDecisions file:\n" + str(self.store.decisions.path)))
-        bar.add_cascade(label="Help", menu=h)
-        self.root.config(menu=bar)
-        self.menubar = bar
+        self.menus = [("File", f), ("View", v), ("Help", h)]
+        if sys.platform == "darwin":
+            # The Mac's menu bar is at the top of the screen, and follows the system's theme by itself.
+            bar = tk.Menu(self.root)
+            for label, menu in self.menus:
+                bar.add_cascade(label=label, menu=menu)
+            self.root.config(menu=bar)
+            return
+        # Windows draws a window's own menu bar itself, always light; this one follows the theme.
+        bar = ttk.Frame(self.root, style="Menubar.TFrame", padding=(4, 2))
+        bar.pack(fill="x")
+        for label, menu in self.menus:
+            mb = ttk.Menubutton(bar, text=label, menu=menu, style="Menubar.TMenubutton", underline=0, width=len(label))
+            mb.pack(side="left")
+            self.root.bind(f"<Alt-{label[0].lower()}>", lambda e, m=menu, b=mb: m.tk_popup(
+                b.winfo_rootx(), b.winfo_rooty() + b.winfo_height()))
 
     def _layout(self) -> None:
-        top = ttk.Frame(self.root, padding=(10, 10, 10, 4))
+        top = ttk.Frame(self.root, padding=(10, 8, 10, 4))
         top.pack(fill="x")
         self.refresh_btn = ttk.Button(top, text="Refresh  (F5)", style="Accent.TButton", command=self.refresh)
         self.refresh_btn.pack(side="left")
@@ -302,38 +312,32 @@ class App:
         self.search = tk.StringVar()
         self.search.trace_add("write", lambda *_: self._search_soon())
         self.search_entry = ttk.Entry(filters, textvariable=self.search, width=28)
-        self.search_entry.pack(side="left", padx=(6, 14))
-        ttk.Label(filters, text="Listed on").pack(side="left", padx=(0, 4))
+        self.search_entry.pack(side="left", padx=(6, 12))
+        # Which sites: a drop-down of checkboxes, as there are more sites than fit in a row.
         self.source_vars = {}
+        self.sources_menu = tk.Menu(self.root, tearoff=False)
         for sid, label in EXTERNAL.items():
             v = tk.BooleanVar(value=True)
-            v.trace_add("write", lambda *_: self.render())
+            v.trace_add("write", lambda *_: (self._sources_label(), self.render()))
             self.source_vars[sid] = v
-            ttk.Checkbutton(filters, text=label, variable=v).pack(side="left", padx=3)
+            self.sources_menu.add_checkbutton(label=label, variable=v)
+        self.sources_menu.add_separator()
+        self.sources_menu.add_command(label="All sites", command=lambda: self._all_sources(True))
+        self.sources_menu.add_command(label="No sites", command=lambda: self._all_sources(False))
+        self.sources_text = tk.StringVar()
+        ttk.Menubutton(filters, textvariable=self.sources_text, menu=self.sources_menu, width=22).pack(side="left")
+        self._sources_label()
         ttk.Separator(filters, orient="vertical").pack(side="left", fill="y", padx=10)
         self.new_only = self._check(filters, "New")
         self.has_release = self._check(filters, "Has a release")
         self.hide_same_game = self._check(filters, "Hide games in Quiver")
         self.multi_only = self._check(filters, "2+ sites")
 
-        panes = ttk.PanedWindow(self.root, orient="vertical")
-        panes.pack(fill="both", expand=True, padx=10)
-        self.tabs = ttk.Notebook(panes)
-        self.tables = {tab: Table(self.tabs, self, tab) for tab in TABS}
-        logframe = ttk.Frame(self.tabs)
-        self.logbox = tk.Text(logframe, height=10, wrap="word", state="disabled", relief="flat", padx=8, pady=6,
-                              highlightthickness=0, borderwidth=0)
-        self.logbox.pack(fill="both", expand=True)
-        for tab, table in self.tables.items():
-            self.tabs.add(table, text=TABS[tab][0])
-        self.tabs.add(logframe, text="Log")
-        self.tabs.bind("<<NotebookTabChanged>>", lambda e: self._tab_changed())
-        panes.add(self.tabs, weight=4)
-
-        bottom = ttk.Frame(panes)
-        panes.add(bottom, weight=1)
-        actions = ttk.Frame(bottom, padding=(0, 8, 0, 4))
-        actions.pack(fill="x")
+        # The bottom is packed before the lists so it keeps its size and the lists take what's left.
+        bottom = ttk.Frame(self.root, padding=(10, 0, 10, 8))
+        bottom.pack(side="bottom", fill="x")
+        actions = ttk.Frame(bottom, padding=(0, 8, 0, 0))
+        actions.pack(side="bottom", fill="x")
         self.btn_open = ttk.Button(actions, text="Open repository  ⏎", command=self.open_repo)
         self.btn_pages = ttk.Button(actions, text="Open listing pages  Ctrl+⏎", command=self.open_pages)
         self.btn_copy = ttk.Button(actions, text="Copy URL  Ctrl+C", command=self.copy_urls)
@@ -344,12 +348,38 @@ class App:
             b.pack(side="left", padx=(0, 6))
         self.count = ttk.Label(actions, text="", style="Muted.TLabel")
         self.count.pack(side="right")
-        self.details = tk.Text(bottom, height=8, wrap="word", state="disabled", relief="flat", padx=10, pady=8,
+        # Details of the selected project: shown only with one selected, and only as tall as what it says.
+        self.details = tk.Text(bottom, height=1, wrap="word", state="disabled", relief="flat", padx=10, pady=6,
                                highlightthickness=0, borderwidth=0, font="TkDefaultFont", cursor="")
-        self.details.pack(fill="both", expand=True, pady=(0, 10))
         self.details.tag_bind("link", "<Enter>", lambda e: self.details.config(cursor="hand2"))
         self.details.tag_bind("link", "<Leave>", lambda e: self.details.config(cursor=""))
+
+        self.tabs = ttk.Notebook(self.root)
+        self.tabs.pack(fill="both", expand=True, padx=10)
+        self.tables = {tab: Table(self.tabs, self, tab) for tab in TABS}
+        logframe = ttk.Frame(self.tabs)
+        self.logbox = tk.Text(logframe, height=10, wrap="word", state="disabled", relief="flat", padx=8, pady=6,
+                              highlightthickness=0, borderwidth=0)
+        self.logbox.pack(fill="both", expand=True)
+        for tab, table in self.tables.items():
+            self.tabs.add(table, text=TABS[tab][0])
+        self.tabs.add(logframe, text="Log")
+        self.tabs.bind("<<NotebookTabChanged>>", lambda e: self._tab_changed())
         self._update_buttons()
+
+    def _sources_label(self) -> None:
+        on = [s for s, v in self.source_vars.items() if v.get()]
+        if len(on) == len(self.source_vars):
+            text = "Listed on: any site"
+        elif len(on) == 1:
+            text = f"Listed on: {EXTERNAL[on[0]]}"
+        else:
+            text = f"Listed on: {len(on)} of {len(self.source_vars)} sites"
+        self.sources_text.set(text)
+
+    def _all_sources(self, on: bool) -> None:
+        for v in self.source_vars.values():
+            v.set(on)
 
     def _check(self, parent, text: str) -> tk.BooleanVar:
         v = tk.BooleanVar(value=False)
@@ -402,7 +432,9 @@ class App:
 
     def recolor(self) -> None:
         c = self.c
-        theme.style_menu(self.menubar, c)
+        for _, menu in self.menus:
+            theme.style_menu(menu, c)
+        theme.style_menu(self.sources_menu, c)
         for t in self.tables.values():
             t.colors(c)
         for text in (self.details, self.logbox):
@@ -748,6 +780,30 @@ class App:
                     d.insert("end", f"{len(cands)} selected", "h")
         finally:
             d.config(state="disabled")
+            self._fit_details()
+
+    def _fit_details(self) -> None:
+        """Show the details only when there are some, exactly as tall as their lines (wrapped), at most 10."""
+        d = self.details
+        if not d.get("1.0", "end-1c").strip():
+            d.pack_forget()
+            return
+        if not d.winfo_ismapped():
+            d.pack(side="top", fill="x", pady=(8, 0))
+        # Lines as written, or more when long ones wrap (which Tk can only tell once the pane has its width).
+        lines = int(d.index("end-1c").split(".")[0])
+        d.update_idletasks()
+        try:
+            shown = d.count("1.0", "end-1c", "displaylines")
+            shown = (shown[0] if isinstance(shown, tuple) else shown) or 0
+        except tk.TclError:
+            shown = 0
+        # Height counts lines of the body font; the title line is in a bigger one.
+        d.configure(height=min(max(lines, shown) + 1, 11))
+        # The list just got shorter; keep the selected row in sight.
+        t = self.tables.get(self.current())
+        if t and t.tree.focus():
+            t.tree.see(t.tree.focus())
 
     def _quiver_details(self, q: Item) -> None:
         d = self.details
@@ -789,7 +845,8 @@ class App:
                 d.insert("end", "   ")
             bits = [f"release {i.version or '?'} on {i.released}" if i.released else "",
                     f"last push {i.pushed}" if i.pushed else "", f"listed {i.added}" if i.added else ""]
-            bits += [f"{k} {v}" for k, v in i.extra.items() if k in ("builds", "stars", "status", "completeness", "ai")]
+            bits += [f"{k.replace('_', ' ')} {v}" for k, v in i.extra.items()
+                     if k in ("builds", "stars", "status", "completeness", "ai", "state", "runs_on")]
             d.insert("end", " · ".join(b for b in bits if b))
             if i.source == "decompbuddy" and not i.extra.get("builds"):
                 d.insert("end", "   no builds published", "warn")
@@ -935,10 +992,16 @@ class App:
             src[sid] = tk.BooleanVar(value=s["sources"].get(sid, True))
             ttk.Checkbutton(body, text=label, variable=src[sid]).grid(row=n, column=0, columnspan=3, sticky="w", pady=1)
         row = len(EXTERNAL) + 1
+        options = ttk.Frame(body)
+        options.grid(row=row, column=0, columnspan=3, sticky="w", pady=(6, 0))
         full = tk.BooleanVar(value=bool(s.get("unbaked_full_scan")))
-        ttk.Checkbutton(body, text="unbaked: read every game's record, not only recent additions\n"
-                        "(about 6,000 requests the first time; later only games with new pushes)", variable=full).grid(
-            row=row, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(options, text="unbaked: read every game's record, not only recent additions\n"
+                        "(about 6,000 requests the first time; later only games with new pushes)",
+                        variable=full).pack(anchor="w")
+        clones = tk.BooleanVar(value=bool(s.get("include_clones")))
+        ttk.Checkbutton(options, text="Include clones: new games in the style of an old one, which OSGameClones,\n"
+                        "Cloned Games and OSGL list many of (not ports of the game itself)",
+                        variable=clones).pack(anchor="w", pady=(6, 0))
 
         def path_row(r, label, value, hint, save):
             ttk.Label(body, text=label, font=bold).grid(row=r, column=0, columnspan=3, sticky="w", pady=(14, 0))
@@ -967,6 +1030,7 @@ class App:
         def save():
             s["sources"] = {k: v.get() for k, v in src.items()}
             s["unbaked_full_scan"] = full.get()
+            s["include_clones"] = clones.get()
             s["quiver_csv"] = csv_var.get().strip()
             s["decisions_path"] = dec_var.get().strip()
             s["your_name"] = name_var.get().strip()

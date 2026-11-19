@@ -15,9 +15,21 @@ Then you can open each one, wait for the ones that aren't ready, and blacklist t
 | **Decomp Buddy** | `tanookistudios.com/decomp-buddy/catalog.json`, the catalog it publishes for anyone to use, with each project's latest release, last push and published builds. | Downloaded only when it changed |
 | **unbaked** | `unbaked.games/api/additions.json`, every project added in the last several weeks. Optionally every game's full record (Settings). | Downloaded only when it changed; full scan: only games with new pushes |
 | **PlayPorted** | `playported.com/sitemap.xml`, then each port's page for its project link (~2,100 pages the first time). | Only new or changed port pages |
+| **OSGameClones** | `osgameclones.com`, every project on one page: remakes, official source releases, and clones. | Downloaded only when it changed |
+| **Cloned Games** | `clonedgames.com/sitemap.xml`, then each project's page for its repository and original game (~4,200 pages, ~120 MB the first time). Its `/api/` is off limits by its robots.txt, so it isn't used. | Only new or changed pages |
+| **OSGL** (Trilarion) | `trilarion.github.io/opensourcegames`, the Open Source Games List: 27 letter pages with each game's repository and what inspired it. Remakes and clones only; original games are left out. | Each page downloaded only when it changed |
 
-A refresh where nothing changed takes a few seconds and downloads almost nothing. **Full refresh** (Shift+F5) ignores
+A refresh where nothing changed takes about ten seconds and downloads almost nothing: catalog files come back as
+"not modified", and page caches only fetch what the sitemaps say is new. **Full refresh** (Shift+F5) ignores
 what's cached and reads everything again.
+
+**Clones** are new games in the style of an old one, not ports of it, so Quiver can't offer them for the original.
+OSGameClones, Cloned Games and OSGL list many; they're left out unless **Settings → Include clones** is on. Cloned
+Games calls everything that isn't a decompilation or recompilation a clone, source ports too, so those of its
+projects count as clones here; most are also on OSGameClones or OSGL as remakes.
+
+Platforms and methods are written one way whichever site they come from: `ps2`, `PS2` and `PlayStation 2` are all
+*PlayStation 2*, `gba` is *Game Boy Advance*, `x360` is *Xbox 360* (see `quiver_scout/names.py`).
 
 Projects are matched by repository, whatever form the link takes: `https://GitHub.com/Owner/Repo.git`,
 `github.com/owner/repo/releases/tag/v1` and `http://www.github.com/owner/repo/` are the same project. GitLab
@@ -63,14 +75,16 @@ to sort (dates sort newest first, with unknown dates last either way); right-cli
 columns. Sorting and columns are remembered. *Game in Quiver* says Quiver already has another app for the same game,
 often a sign it's a fork; the details pane links to it.
 
-Filters: search (every word must match the project, game, URL, author, platform, method or note), which sites a
-project is listed on, *New* (in the last refresh), *Has a release*, *Hide games in Quiver*, and *2+ sites*.
+Filters: search (every word must match the project, game, URL, author, platform, method or note), *Listed on*
+(a drop-down of the sites), *New* (in the last refresh), *Has a release*, *Hide games in Quiver*, and *2+ sites*.
 
-The details pane shows what each site says about the selected project: its page there, the release it knows of,
+The details pane, under the list when one project is selected and only as tall as what it says, shows what each
+site says about it: its page there, the release it knows of,
 the last push, when it was listed, stars, and for Decomp Buddy which systems it publishes builds for (a project with
 no builds is likely one to wait for).
 
-**View → Theme** switches between light, dark, and the system's setting. On Windows the title bar follows too.
+**View → Theme** switches between light, dark, and the system's setting. The menu bar and, on Windows, the title bar
+follow too. Alt+F, Alt+V and Alt+H open the menus.
 
 | Key | Action |
 | --- | --- |
@@ -136,8 +150,8 @@ only refreshes, for running on a schedule. `--full` reads everything again.
 
 ## Settings and data
 
-Settings are in File → Settings: which sites to read, the unbaked full scan, a Quiver CSV to use instead of the API,
-the decisions file, and your name.
+Settings are in File → Settings: which sites to read, the unbaked full scan, whether to include clones, a Quiver CSV
+to use instead of the API, the decisions file, and your name.
 
 **Quiver CSV**: when Quiver's admins export the catalog, pick the file here. It needs a URL column (`url`,
 `repository`, `repo`, `source` or similar), and uses `title`, `game` and `slug` columns when it has them.

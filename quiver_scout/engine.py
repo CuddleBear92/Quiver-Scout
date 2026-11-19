@@ -7,8 +7,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .decisions import BLACKLIST, WAIT_REASONS, WAITING
-from .sources import EXTERNAL, Context, Item, decompbuddy, playported, quiver, recomplauncher, unbaked
-from .sources.base import Progress, no_progress
+from . import names
+from .sources import (EXTERNAL, Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
+                      recomplauncher, trilarion, unbaked)
+from .sources.base import Progress, day, no_progress
 from .store import Store
 from .urls import aliases, normalize_title
 
@@ -41,12 +43,17 @@ def _fetch_one(store: Store, name: str, ctx: Context) -> list[Item]:
         finally:
             if cache:
                 store.save_pages("unbaked", cache)
-    if name == "playported":
-        cache = store.pages("playported")
+    if name in ("playported", "clonedgames"):
+        module = playported if name == "playported" else clonedgames
+        cache = store.pages(name)
         try:
-            return playported.fetch(ctx, cache=cache)
+            return module.fetch(ctx, cache=cache)
         finally:
-            store.save_pages("playported", cache)
+            store.save_pages(name, cache)
+    if name == "osgameclones":
+        return osgameclones.fetch(ctx)
+    if name == "trilarion":
+        return trilarion.fetch(ctx)
     raise ValueError(name)
 
 
@@ -158,8 +165,18 @@ def supported_hosts(quiver_items: list[Item]) -> set[str]:
     return hosts
 
 
+def _tidy(i: Item) -> Item:
+    """The same words and dates for every site: "ps2" and "PlayStation 2", "2026-11-07T22:02:09" and "2026-11-07"."""
+    i.platform = names.platform(i.platform)
+    i.method = names.method(i.method)
+    i.added, i.released, i.pushed = day(i.added), day(i.released), day(i.pushed)
+    return i
+
+
 def compare(store: Store) -> Comparison:
-    items = [Item.from_dict(d) for d in store.items()]
+    clones = bool(store.settings.get("include_clones"))
+    items = [_tidy(Item.from_dict(d)) for d in store.items()]
+    items = [i for i in items if clones or not i.extra.get("clone")]
     seen = store.seen()
     quiver_items = [i for i in items if i.source == "quiver"]
     hosts = supported_hosts(quiver_items)

@@ -138,6 +138,17 @@ def apply(root: tk.Tk, mode: str) -> dict:
     style.configure("TSeparator", background=c["border"])
     style.configure("TCombobox", fieldbackground=c["field"], background=c["raised"], foreground=c["fg"],
                     arrowcolor=c["fg"], bordercolor=c["border"])
+    style.configure("TMenubutton", background=c["raised"], foreground=c["fg"], bordercolor=c["border"],
+                    lightcolor=c["raised"], darkcolor=c["raised"], arrowcolor=c["fg"], padding=(8, 3))
+    style.map("TMenubutton", background=[("active", c["border"])])
+    # The window's own menu bar: flat labels with no arrow, lit up under the pointer.
+    style.configure("Menubar.TFrame", background=c["surface"])
+    style.layout("Menubar.TMenubutton", [("Menubutton.border", {"sticky": "nswe", "children": [
+        ("Menubutton.padding", {"sticky": "nswe", "children": [("Menubutton.label", {"sticky": "nswe"})]})]})])
+    style.configure("Menubar.TMenubutton", background=c["surface"], foreground=c["fg"], borderwidth=0,
+                    relief="flat", padding=(10, 3))
+    style.map("Menubar.TMenubutton", background=[("active", c["select"]), ("pressed", c["select"])],
+              foreground=[("active", c["on_select"])])
 
     root.configure(background=c["bg"])
     for pattern, value in {
