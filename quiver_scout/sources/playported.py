@@ -1,7 +1,8 @@
 """PlayPorted (playported.com): console games ported to PC, one page per port.
 
 There is no JSON API, so the sitemap gives every port page and when it last changed, and each page gives the
-port's project link. Pages are kept in the cache and only read again when the sitemap says they changed.
+port's project link. Pages are kept and only read again when the sitemap says they changed; the sitemap itself
+is only downloaded again when it changed.
 """
 
 from __future__ import annotations
@@ -11,8 +12,8 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ..net import get_text
-from .base import Item, Progress, no_progress
+from .. import net
+from .base import Context, Item
 
 SITE = "https://playported.com"
 SITEMAP = f"{SITE}/sitemap.xml"
@@ -82,16 +83,16 @@ def _item(page_url: str, d: dict) -> Item:
     )
 
 
-def fetch(progress: Progress = no_progress, cache: dict | None = None, workers: int = 4) -> list[Item]:
-    """`cache` (page URL -> {"lastmod", "port"}) is updated in place."""
+def fetch(ctx: Context, cache: dict | None = None, workers: int = 4) -> list[Item]:
+    """`cache` (page URL -> {"version": lastmod, "data": port}) is updated in place."""
     cache = cache if cache is not None else {}
-    progress("PlayPorted: reading sitemap", 0, 0)
-    pages = parse_sitemap(get_text(SITEMAP, timeout=60))
-    stale = [u for u, mod in pages.items() if u not in cache or cache[u].get("lastmod") != mod]
-    progress(f"PlayPorted: {len(stale)} of {len(pages)} port pages to read", 0, len(stale))
+    ctx.progress("PlayPorted: sitemap", 0, 0)
+    pages = parse_sitemap(ctx.text(SITEMAP)[0])
+    stale = [u for u, mod in pages.items() if ctx.full or u not in cache or cache[u].get("version") != mod]
+    ctx.progress(f"PlayPorted: {len(stale)} of {len(pages)} port pages to read", 0, len(stale))
 
     def one(url: str):
-        return url, parse_port(url, get_text(url))
+        return url, parse_port(url, net.get_text(url))
 
     errors, done = 0, 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -99,14 +100,14 @@ def fetch(progress: Progress = no_progress, cache: dict | None = None, workers: 
             done += 1
             try:
                 url, port = future.result()
-                cache[url] = {"lastmod": pages[url], "port": port}
+                cache[url] = {"version": pages[url], "data": port}
             except Exception:
                 errors += 1
             if done % 25 == 0 or done == len(stale):
-                progress(f"PlayPorted: port pages {done}/{len(stale)}", done, len(stale))
+                ctx.progress(f"PlayPorted: port pages {done}/{len(stale)}", done, len(stale))
 
     for gone in set(cache) - set(pages):
         del cache[gone]
-    items = [_item(u, c["port"]) for u, c in cache.items() if c.get("port")]
-    progress(f"PlayPorted: {len(items)} ports" + (f" ({errors} pages failed)" if errors else ""), 1, 1)
+    items = [_item(u, c["data"]) for u, c in cache.items() if c.get("data")]
+    ctx.progress(f"PlayPorted: {len(items)} ports" + (f" ({errors} pages failed)" if errors else ""), 1, 1)
     return items
