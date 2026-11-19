@@ -1,7 +1,8 @@
 """The Quiver Launcher catalog, from its public API (the same one the launcher uses) or from a CSV export.
 
 /release-status lists every app with its repository (provider, host, owner/name); /apps gives each app's
-name and games. Both are paged 100 at a time.
+name and games. Both are paged 100 at a time. /release-status is read every refresh (it has each repository's
+newest release); /apps only for apps not seen before, newest first, stopping once it has them all.
 """
 
 from __future__ import annotations
@@ -9,61 +10,95 @@ from __future__ import annotations
 import csv
 from urllib.parse import quote
 
-from ..net import get_json
+from .. import net
 from ..urls import from_provider
-from .base import Item, Progress, no_progress
+from .base import Context, Item, day
 
 API = "https://api.quiverlauncher.com/api/v1"
 FALLBACK_API = "https://famous-wildebeest-660.convex.site/api/v1"
 SITE = "https://quiverlauncher.com"
 
+# More unknown apps than this and reading the whole list by name is quicker than paging newest-first.
+FULL_LIST_ABOVE = 300
 
-def _pages(base: str, path: str, progress: Progress, label: str) -> list[dict]:
+
+def _pages(ctx: Context, base: str, path: str, label: str, until=None) -> list[dict]:
+    """Every page of a list, or until `until(items so far)` says enough."""
     items: list[dict] = []
     cursor = None
     while True:
         url = f"{base}{path}{'&' if '?' in path else '?'}limit=100"
         if cursor:
             url += "&cursor=" + quote(cursor, safe="")
-        page = get_json(url)
+        page = net.get_json(url)
         items += page.get("items", [])
-        progress(f"Quiver: {label} ({len(items)})", len(items), 0)
+        ctx.progress(f"Quiver: {label} ({len(items)})", len(items), 0)
         cursor = page.get("nextCursor")
-        if page.get("isDone") or not cursor:
+        if page.get("isDone") or not cursor or (until and until(items)):
             return items
 
 
-def fetch(progress: Progress = no_progress, base: str = API) -> list[Item]:
+def _summary(app: dict) -> dict:
+    """What's kept of an app between refreshes: what doesn't change with its releases."""
+    return {
+        "name": app.get("name", ""),
+        "projectName": app.get("projectName", ""),
+        "games": [g.get("title", "") for g in app.get("games", [])],
+        "consoles": app.get("consoles") or [],
+        "projectType": app.get("projectType", ""),
+        "developer": (app.get("developer") or {}).get("name", ""),
+        "addedAt": app.get("addedAt"),
+    }
+
+
+def fetch(ctx: Context, cache: dict | None = None, base: str = API) -> list[Item]:
+    """`cache` (slug -> {"data": app summary}) is updated in place: only apps it doesn't know are asked for."""
+    cache = cache if cache is not None else {}
     try:
-        status = _pages(base, "/release-status", progress, "repositories")
+        status = _pages(ctx, base, "/release-status", "repositories")
     except Exception:
         if base != API:
             raise
         base = FALLBACK_API
-        status = _pages(base, "/release-status", progress, "repositories")
-    apps = {a["slug"]: a for a in _pages(base, "/apps?sort=name", progress, "app names")}
+        status = _pages(ctx, base, "/release-status", "repositories")
+
+    slugs = {s.get("slug") for s in status}
+    unknown = set(slugs) if ctx.full else {s for s in slugs if s not in cache}
+    if unknown:
+        if len(unknown) > FULL_LIST_ABOVE:
+            apps = _pages(ctx, base, "/apps?sort=name", "app names")
+        else:
+            apps = _pages(ctx, base, "/apps?sort=added", f"names of {len(unknown)} new apps",
+                          until=lambda got: unknown <= {a.get("slug") for a in got})
+        for a in apps:
+            cache[a["slug"]] = {"version": "", "data": _summary(a)}
+    for gone in set(cache) - slugs:
+        del cache[gone]
 
     items = []
     for s in status:
         slug = s.get("slug", "")
-        app = apps.get(slug, {})
-        games = [g.get("title", "") for g in app.get("games", [])]
+        app = (cache.get(slug) or {}).get("data") or {}
         url = from_provider(s.get("provider", ""), s.get("repository", ""), s.get("host"))
+        latest = s.get("latestUpstream") or s.get("verified") or {}  # the repository's newest release
         items.append(
             Item(
                 source="quiver",
                 url=url,
                 title=app.get("projectName") or app.get("name") or slug,
-                game="; ".join(g for g in games if g),
+                game="; ".join(g for g in app.get("games", []) if g),
                 page=f"{SITE}/apps/{slug}" if slug else "",
                 method=app.get("projectType", ""),
-                platform=", ".join(app.get("consoles", []) or []),
-                author=(app.get("developer") or {}).get("name", ""),
+                platform=", ".join(app.get("consoles", [])),
+                author=app.get("developer", ""),
+                added=day(app.get("addedAt")),
+                released=day(latest.get("releasedAt")),
+                version=latest.get("version", ""),
                 slug=slug,
                 extra={"provider": s.get("provider", ""), "name": app.get("name", "")},
             )
         )
-    progress(f"Quiver: {len(items)} apps", 1, 1)
+    ctx.progress(f"Quiver: {len(items)} apps", 1, 1)
     return items
 
 

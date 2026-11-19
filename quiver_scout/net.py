@@ -7,6 +7,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from typing import Any
 
 from . import __version__
@@ -18,18 +19,27 @@ class FetchError(RuntimeError):
     pass
 
 
-def get_bytes(url: str, timeout: float = 30, retries: int = 3) -> bytes:
+@dataclass
+class Response:
+    status: int  # 200, or 304 when the server says the copy we have is still current
+    body: bytes = b""
+    headers: dict = field(default_factory=dict)
+
+
+def request(url: str, headers: dict | None = None, timeout: float = 30, retries: int = 3) -> Response:
     """GET a URL, retrying on network errors, 429 and 5xx with a growing pause."""
     last: Exception | None = None
     for attempt in range(retries):
-        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip"})
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip", **(headers or {})})
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                body = response.read()
-                if response.headers.get("Content-Encoding") == "gzip":
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                body = r.read()
+                if r.headers.get("Content-Encoding") == "gzip":
                     body = gzip.decompress(body)
-                return body
+                return Response(r.status, body, {k.lower(): v for k, v in r.headers.items()})
         except urllib.error.HTTPError as e:
+            if e.code == 304:
+                return Response(304, b"", {k.lower(): v for k, v in e.headers.items()})
             last = e
             if e.code != 429 and e.code < 500:
                 raise FetchError(f"{url}: HTTP {e.code}") from e
@@ -37,6 +47,10 @@ def get_bytes(url: str, timeout: float = 30, retries: int = 3) -> bytes:
             last = e
         time.sleep(1.5 * (attempt + 1))
     raise FetchError(f"{url}: {last}")
+
+
+def get_bytes(url: str, **kw: Any) -> bytes:
+    return request(url, **kw).body
 
 
 def get_text(url: str, **kw: Any) -> str:

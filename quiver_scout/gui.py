@@ -1,45 +1,61 @@
-"""The maintainer window: lists of what's missing from Quiver, what it has, and what was blacklisted."""
+"""The maintainer window: what's missing from Quiver, what's on other sites, what's waiting, and the blacklist."""
 
 from __future__ import annotations
 
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
 import tkinter as tk
 import webbrowser
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
-from . import __version__, engine
+from . import __version__, engine, theme
+from .decisions import BLACKLIST, WAIT_REASONS, WAITING
 from .engine import Candidate, Comparison
 from .sources import EXTERNAL, Item
 from .store import Store
 
-MISSING_COLUMNS = [
-    ("title", "Project", 230),
-    ("game", "Game", 220),
-    ("platform", "Platform", 70),
-    ("method", "Method", 110),
-    ("sources", "Listed on", 170),
-    ("url", "URL", 300),
-    ("first_seen", "First seen", 110),
-    ("same_game", "Game in Quiver", 110),
-]
-QUIVER_COLUMNS = [
-    ("title", "App", 260),
-    ("game", "Game", 240),
-    ("url", "URL", 340),
-    ("also_on", "Also listed on", 200),
-    ("slug", "Slug", 200),
-]
-BLACKLIST_COLUMNS = [
-    ("title", "Project", 240),
-    ("game", "Game", 220),
-    ("url", "URL", 320),
-    ("reason", "Reason", 260),
-    ("date", "Blacklisted", 90),
-]
+# Columns: id, heading, width, kind ("date" sorts with empty values last, whichever way).
+COL = {
+    "title": ("Project", 230, ""),
+    "game": ("Game", 220, ""),
+    "platform": ("Platform", 80, ""),
+    "method": ("Method", 110, ""),
+    "sources": ("Listed on", 180, ""),
+    "host": ("Site", 170, ""),
+    "released": ("Latest release", 125, "date"),
+    "version": ("Version", 80, ""),
+    "pushed": ("Last push", 105, "date"),
+    "added": ("Listed since", 115, "date"),
+    "first_seen": ("First seen", 115, "date"),
+    "same_game": ("Game in Quiver", 120, ""),
+    "reason": ("Waiting for", 200, ""),
+    "note": ("Note", 220, ""),
+    "since": ("Since", 100, "date"),
+    "by": ("By", 90, ""),
+    "state": ("Now", 120, ""),
+    "also_on": ("Also listed on", 200, ""),
+    "slug": ("Slug", 180, ""),
+    "url": ("URL", 300, ""),
+}
+
+TABS = {
+    "missing": ("Missing", ["title", "game", "platform", "method", "sources", "released", "version", "pushed", "added",
+                            "first_seen", "same_game", "url"]),
+    "other": ("Other sites", ["title", "game", "host", "sources", "released", "added", "first_seen", "url"]),
+    "waiting": ("Waiting", ["title", "game", "reason", "note", "released", "version", "sources", "since", "by", "state",
+                            "url"]),
+    "blacklist": ("Blacklist", ["title", "game", "note", "since", "by", "state", "url"]),
+    "quiver": ("In Quiver", ["title", "game", "released", "version", "added", "also_on", "slug", "url"]),
+}
+# Progress messages that only count up, shown in the status line but not kept in the log.
+NOISY = re.compile(r"(pages|records) \d+/\d+|\(\d+\)$")
+
+# Hidden until shown from a heading's right-click menu.
+DEFAULT_HIDDEN = {"missing": ["pushed", "first_seen"], "waiting": ["by"], "blacklist": ["by"]}
 
 
 def open_url(url: str) -> None:
@@ -57,15 +73,17 @@ def open_folder(path: str) -> None:
 
 
 class Table(ttk.Frame):
-    """A Treeview with scrollbars and click-to-sort headings."""
+    """A Treeview with scrollbars, sortable headings and columns that can be hidden."""
 
-    def __init__(self, master, columns, on_select=None, on_activate=None, on_menu=None):
+    def __init__(self, master, app: "App", tab: str):
         super().__init__(master)
-        self.columns = columns
-        self.tree = ttk.Treeview(self, columns=[c[0] for c in columns], show="headings", selectmode="extended")
-        for cid, label, width in columns:
+        self.app, self.tab = app, tab
+        self.columns = TABS[tab][1]
+        self.tree = ttk.Treeview(self, columns=self.columns, show="headings", selectmode="extended")
+        for cid in self.columns:
+            label, width, _ = COL[cid]
             self.tree.heading(cid, text=label, command=lambda c=cid: self.sort_by(c))
-            self.tree.column(cid, width=width, minwidth=50, stretch=cid in ("title", "game", "url", "reason"))
+            self.tree.column(cid, width=width, minwidth=50, stretch=cid in ("title", "game", "url", "note"))
         ys = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         xs = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
@@ -74,24 +92,59 @@ class Table(ttk.Frame):
         xs.grid(row=1, column=0, sticky="ew")
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        self.tree.tag_configure("new", font=("TkDefaultFont", 9, "bold"))
-        self.tree.tag_configure("dim", foreground="#777777")
-        self.sort_col, self.sort_desc = None, False
-        if on_select:
-            self.tree.bind("<<TreeviewSelect>>", lambda e: on_select())
-        if on_activate:
-            self.tree.bind("<Double-1>", lambda e: on_activate())
-            self.tree.bind("<Return>", lambda e: on_activate())
-        if on_menu:
-            self.tree.bind("<Button-3>", on_menu)
-            self.tree.bind("<Button-2>", on_menu)
+        saved = app.store.settings.get("sort", {}).get(tab)
+        self.sort_col, self.sort_desc = (saved[0], saved[1]) if saved and saved[0] in self.columns else (None, False)
+        self.apply_hidden()
+        self._headings()
+        self.tree.bind("<<TreeviewSelect>>", lambda e: app.show_details())
+        self.tree.bind("<Double-1>", self._double)
+        self.tree.bind("<Return>", lambda e: app.open_repo())
+        self.tree.bind("<Button-3>", self._menu)
+        self.tree.bind("<Button-2>", self._menu)
 
-    def fill(self, rows: list[tuple[str, tuple, tuple]]) -> None:
-        """rows: (iid, values, tags)."""
+    def colors(self, c: dict) -> None:
+        f = c["fonts"]
+        self.tree.tag_configure("new", font=f["bold"])
+        self.tree.tag_configure("dim", foreground=c["dim"])
+        self.tree.tag_configure("flag", foreground=c["good"])
+
+    def hidden(self) -> list[str]:
+        return self.app.store.settings.get("hidden_columns", {}).get(self.tab, DEFAULT_HIDDEN.get(self.tab, []))
+
+    def apply_hidden(self) -> None:
+        hidden = set(self.hidden())
+        self.tree["displaycolumns"] = [c for c in self.columns if c not in hidden] or self.columns
+
+    def toggle_column(self, cid: str) -> None:
+        hidden = list(self.hidden())
+        hidden.remove(cid) if cid in hidden else hidden.append(cid)
+        self.app.store.settings.setdefault("hidden_columns", {})[self.tab] = hidden
+        self.app.store.save_settings()
+        self.apply_hidden()
+
+    def _double(self, event) -> None:
+        if self.tree.identify_region(event.x, event.y) == "cell":
+            self.app.open_repo()
+
+    def _menu(self, event) -> None:
+        if self.tree.identify_region(event.x, event.y) == "heading":
+            m = tk.Menu(self, tearoff=False)
+            hidden = set(self.hidden())
+            self._menu_vars = []  # Tk forgets a checkbutton's state if its variable is garbage collected
+            for cid in self.columns:
+                var = tk.BooleanVar(value=cid not in hidden)
+                self._menu_vars.append(var)
+                m.add_checkbutton(label=COL[cid][0], variable=var, command=lambda c=cid: self.toggle_column(c))
+            m.tk_popup(event.x_root, event.y_root)
+            return
+        self.app.context_menu(event)
+
+    def fill(self, rows: list[tuple[str, dict, tuple]]) -> None:
+        """rows: (iid, values by column id, tags)."""
         selected = set(self.tree.selection())
         self.tree.delete(*self.tree.get_children())
         for iid, values, tags in rows:
-            self.tree.insert("", "end", iid=iid, values=values, tags=tags)
+            self.tree.insert("", "end", iid=iid, values=[values.get(c, "") for c in self.columns], tags=tags)
         if self.sort_col:
             self._sort()
         keep = [i for i in selected if self.tree.exists(i)]
@@ -103,19 +156,71 @@ class Table(ttk.Frame):
         return list(self.tree.selection())
 
     def sort_by(self, col: str) -> None:
-        self.sort_desc = not self.sort_desc if self.sort_col == col else False
-        self.sort_col = col
+        if self.sort_col == col:
+            self.sort_desc = not self.sort_desc
+        else:
+            # Dates sort newest first to begin with: that's what's asked of them.
+            self.sort_col, self.sort_desc = col, COL[col][2] == "date"
+        self.app.store.settings.setdefault("sort", {})[self.tab] = [self.sort_col, self.sort_desc]
+        self.app.store.save_settings()
         self._sort()
 
     def _sort(self) -> None:
         col = self.sort_col
         rows = [(str(self.tree.set(i, col)).lower(), i) for i in self.tree.get_children("")]
-        rows.sort(reverse=self.sort_desc)
-        for n, (_, iid) in enumerate(rows):
+        filled = sorted((r for r in rows if r[0]), reverse=self.sort_desc)
+        empty = [r for r in rows if not r[0]]
+        for n, (_, iid) in enumerate(filled + empty):
             self.tree.move(iid, "", n)
-        for cid, label, _ in self.columns:
-            arrow = (" ▼" if self.sort_desc else " ▲") if cid == col else ""
-            self.tree.heading(cid, text=label + arrow)
+        self._headings()
+
+    def _headings(self) -> None:
+        for cid in self.columns:
+            arrow = (" ▼" if self.sort_desc else " ▲") if cid == self.sort_col else ""
+            self.tree.heading(cid, text=COL[cid][0] + arrow)
+
+
+class DecisionDialog(tk.Toplevel):
+    """Asks why: a reason to wait (for Waiting) and a note."""
+
+    def __init__(self, app: "App", title: str, message: str, reasons: dict | None = None, reason: str = "",
+                 note: str = ""):
+        super().__init__(app.root)
+        self.result: tuple[str, str] | None = None
+        self.title(title)
+        self.transient(app.root)
+        self.resizable(False, False)
+        body = ttk.Frame(self, padding=16)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text=message, font=app.c["fonts"]["bold"], wraplength=440).pack(anchor="w")
+        self.reason = tk.StringVar(value=reason or (next(iter(reasons)) if reasons else ""))
+        if reasons:
+            ttk.Label(body, text="Waiting for:", style="Muted.TLabel").pack(anchor="w", pady=(10, 2))
+            for n, (rid, label) in enumerate(reasons.items(), start=1):
+                ttk.Radiobutton(body, text=f"{n}  {label}", value=rid, variable=self.reason).pack(anchor="w", pady=1)
+                self.bind(str(n), lambda e, r=rid: self.reason.set(r) if e.widget is not self.entry else None)
+        ttk.Label(body, text="Note (optional):", style="Muted.TLabel").pack(anchor="w", pady=(10, 2))
+        self.note = tk.StringVar(value=note)
+        self.entry = ttk.Entry(body, textvariable=self.note, width=58)
+        self.entry.pack(fill="x")
+        buttons = ttk.Frame(body)
+        buttons.pack(fill="x", pady=(14, 0))
+        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text="OK", style="Accent.TButton", command=self.ok).pack(side="right", padx=6)
+        self.bind("<Return>", lambda e: self.ok())
+        self.bind("<Escape>", lambda e: self.destroy())
+        theme.dark_title_bar(self, app.c["dark"])
+        self.entry.focus_set()
+        self.grab_set()
+        self.update_idletasks()
+        x = app.root.winfo_rootx() + (app.root.winfo_width() - self.winfo_width()) // 2
+        y = app.root.winfo_rooty() + (app.root.winfo_height() - self.winfo_height()) // 3
+        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        self.wait_window()
+
+    def ok(self) -> None:
+        self.result = (self.reason.get(), self.note.get().strip())
+        self.destroy()
 
 
 class App:
@@ -127,16 +232,22 @@ class App:
         self.quiver_rows: dict[str, Item] = {}
         self.events: queue.Queue = queue.Queue()
         self.refreshing = False
+        self.dirty: set[str] = set()
+        self._search_after = None
+        self._links = 0
 
         root.title("Quiver Scout")
-        root.geometry("1400x820")
-        root.minsize(900, 500)
+        root.geometry("1440x860")
+        root.minsize(960, 520)
+        self.c = theme.apply(root, store.settings.get("theme", "system"))
         self._menu()
         self._layout()
         self._keys()
+        self.recolor()
         self.reload()
-        if not self.store.snapshot:
+        if not self.store.meta("refresh"):
             self.log("No data yet. Press Refresh (F5) to read Quiver and the listing sites.")
+        root.bind("<FocusIn>", self._focus)
 
     # ---- layout --------------------------------------------------------------------------------------------------
 
@@ -144,6 +255,8 @@ class App:
         bar = tk.Menu(self.root)
         f = tk.Menu(bar, tearoff=False)
         f.add_command(label="Refresh", accelerator="F5", command=self.refresh)
+        f.add_command(label="Full refresh (read everything again)", accelerator="Shift+F5",
+                      command=lambda: self.refresh(full=True))
         f.add_separator()
         f.add_command(label="Export this list as CSV…", accelerator="Ctrl+E", command=self.export_view)
         f.add_command(label="Export every project as CSV…", command=self.export_all)
@@ -154,305 +267,455 @@ class App:
         f.add_separator()
         f.add_command(label="Quit", command=self.root.destroy)
         bar.add_cascade(label="File", menu=f)
+        v = tk.Menu(bar, tearoff=False)
+        self.theme_var = tk.StringVar(value=self.store.settings.get("theme", "system"))
+        for mode, label in (("system", "Theme: same as system"), ("light", "Theme: light"), ("dark", "Theme: dark")):
+            v.add_radiobutton(label=label, value=mode, variable=self.theme_var, command=self.set_theme)
+        v.add_separator()
+        v.add_command(label="Choose columns: right-click a column heading", state="disabled")
+        bar.add_cascade(label="View", menu=v)
         h = tk.Menu(bar, tearoff=False)
         h.add_command(label="Keyboard shortcuts", command=self.shortcuts)
         h.add_command(label="About", command=lambda: messagebox.showinfo(
             "Quiver Scout", f"Quiver Scout {__version__}\n\nFinds recomps and ports listed on other sites that "
-            "Quiver Launcher doesn't have yet.\n\nData folder:\n" + str(self.store.dir)))
+            "Quiver Launcher doesn't have yet.\n\nData folder:\n" + str(self.store.dir)
+            + "\n\nDecisions file:\n" + str(self.store.decisions.path)))
         bar.add_cascade(label="Help", menu=h)
         self.root.config(menu=bar)
+        self.menubar = bar
 
     def _layout(self) -> None:
-        top = ttk.Frame(self.root, padding=(8, 8, 8, 4))
+        top = ttk.Frame(self.root, padding=(10, 10, 10, 4))
         top.pack(fill="x")
-        self.refresh_btn = ttk.Button(top, text="Refresh  (F5)", command=self.refresh)
+        self.refresh_btn = ttk.Button(top, text="Refresh  (F5)", style="Accent.TButton", command=self.refresh)
         self.refresh_btn.pack(side="left")
         self.progress = ttk.Progressbar(top, length=220, mode="determinate")
-        self.progress.pack(side="left", padx=8)
+        self.progress.pack(side="left", padx=10)
         self.status = ttk.Label(top, text="")
         self.status.pack(side="left", fill="x", expand=True)
-        self.refreshed = ttk.Label(top, text="", foreground="#666666")
+        self.refreshed = ttk.Label(top, text="", style="Muted.TLabel")
         self.refreshed.pack(side="right")
 
-        filters = ttk.Frame(self.root, padding=(8, 0, 8, 4))
+        filters = ttk.Frame(self.root, padding=(10, 2, 10, 6))
         filters.pack(fill="x")
-        ttk.Label(filters, text="Search:").pack(side="left")
+        ttk.Label(filters, text="Search").pack(side="left")
         self.search = tk.StringVar()
-        self.search.trace_add("write", lambda *_: self.render())
-        self.search_entry = ttk.Entry(filters, textvariable=self.search, width=36)
-        self.search_entry.pack(side="left", padx=(4, 12))
-        ttk.Label(filters, text="Listed on:").pack(side="left")
+        self.search.trace_add("write", lambda *_: self._search_soon())
+        self.search_entry = ttk.Entry(filters, textvariable=self.search, width=28)
+        self.search_entry.pack(side="left", padx=(6, 14))
+        ttk.Label(filters, text="Listed on").pack(side="left", padx=(0, 4))
         self.source_vars = {}
         for sid, label in EXTERNAL.items():
             v = tk.BooleanVar(value=True)
             v.trace_add("write", lambda *_: self.render())
             self.source_vars[sid] = v
-            ttk.Checkbutton(filters, text=label, variable=v).pack(side="left", padx=2)
-        ttk.Separator(filters, orient="vertical").pack(side="left", fill="y", padx=8)
-        self.new_only = tk.BooleanVar(value=False)
-        self.new_only.trace_add("write", lambda *_: self.render())
-        ttk.Checkbutton(filters, text="New in last refresh only", variable=self.new_only).pack(side="left", padx=2)
-        self.hide_same_game = tk.BooleanVar(value=False)
-        self.hide_same_game.trace_add("write", lambda *_: self.render())
-        ttk.Checkbutton(filters, text="Hide games Quiver already has", variable=self.hide_same_game).pack(side="left", padx=2)
-        self.multi_only = tk.BooleanVar(value=False)
-        self.multi_only.trace_add("write", lambda *_: self.render())
-        ttk.Checkbutton(filters, text="On 2+ sites", variable=self.multi_only).pack(side="left", padx=2)
+            ttk.Checkbutton(filters, text=label, variable=v).pack(side="left", padx=3)
+        ttk.Separator(filters, orient="vertical").pack(side="left", fill="y", padx=10)
+        self.new_only = self._check(filters, "New")
+        self.has_release = self._check(filters, "Has a release")
+        self.hide_same_game = self._check(filters, "Hide games in Quiver")
+        self.multi_only = self._check(filters, "2+ sites")
 
         panes = ttk.PanedWindow(self.root, orient="vertical")
-        panes.pack(fill="both", expand=True, padx=8)
+        panes.pack(fill="both", expand=True, padx=10)
         self.tabs = ttk.Notebook(panes)
-        self.missing = Table(self.tabs, MISSING_COLUMNS, self.show_details, self.open_repo, self.context_menu)
-        self.in_quiver = Table(self.tabs, QUIVER_COLUMNS, self.show_details, self.open_repo, self.context_menu)
-        self.blacklisted = Table(self.tabs, BLACKLIST_COLUMNS, self.show_details, self.open_repo, self.context_menu)
+        self.tables = {tab: Table(self.tabs, self, tab) for tab in TABS}
         logframe = ttk.Frame(self.tabs)
-        self.logbox = tk.Text(logframe, height=10, wrap="word", state="disabled")
+        self.logbox = tk.Text(logframe, height=10, wrap="word", state="disabled", relief="flat", padx=8, pady=6,
+                              highlightthickness=0, borderwidth=0)
         self.logbox.pack(fill="both", expand=True)
-        self.tabs.add(self.missing, text="Missing")
-        self.tabs.add(self.in_quiver, text="In Quiver")
-        self.tabs.add(self.blacklisted, text="Blacklist")
+        for tab, table in self.tables.items():
+            self.tabs.add(table, text=TABS[tab][0])
         self.tabs.add(logframe, text="Log")
-        self.tabs.bind("<<NotebookTabChanged>>", lambda e: (self._update_buttons(), self.show_details()))
+        self.tabs.bind("<<NotebookTabChanged>>", lambda e: self._tab_changed())
         panes.add(self.tabs, weight=4)
 
         bottom = ttk.Frame(panes)
         panes.add(bottom, weight=1)
-        actions = ttk.Frame(bottom, padding=(0, 6, 0, 4))
+        actions = ttk.Frame(bottom, padding=(0, 8, 0, 4))
         actions.pack(fill="x")
-        self.btn_open = ttk.Button(actions, text="Open repository  (Enter)", command=self.open_repo)
-        self.btn_pages = ttk.Button(actions, text="Open listing pages  (Ctrl+Enter)", command=self.open_pages)
-        self.btn_copy = ttk.Button(actions, text="Copy URL  (Ctrl+C)", command=self.copy_urls)
-        self.btn_black = ttk.Button(actions, text="Blacklist…  (Del)", command=self.blacklist_selected)
-        self.btn_unblack = ttk.Button(actions, text="Remove from blacklist  (Del)", command=self.unblacklist_selected)
-        for b in (self.btn_open, self.btn_pages, self.btn_copy, self.btn_black, self.btn_unblack):
+        self.btn_open = ttk.Button(actions, text="Open repository  ⏎", command=self.open_repo)
+        self.btn_pages = ttk.Button(actions, text="Open listing pages  Ctrl+⏎", command=self.open_pages)
+        self.btn_copy = ttk.Button(actions, text="Copy URL  Ctrl+C", command=self.copy_urls)
+        self.btn_wait = ttk.Button(actions, text="Wait…  W", command=self.wait_selected)
+        self.btn_black = ttk.Button(actions, text="Blacklist…  Del", command=self.blacklist_selected)
+        self.btn_back = ttk.Button(actions, text="Back to the list  Backspace", command=self.undecide_selected)
+        for b in (self.btn_open, self.btn_pages, self.btn_copy, self.btn_wait, self.btn_black, self.btn_back):
             b.pack(side="left", padx=(0, 6))
-        self.count = ttk.Label(actions, text="")
+        self.count = ttk.Label(actions, text="", style="Muted.TLabel")
         self.count.pack(side="right")
-        self.details = tk.Text(bottom, height=7, wrap="word", state="disabled", relief="flat", padx=6, pady=4,
-                               background=self.root.cget("background"), font="TkDefaultFont")
-        self.details.pack(fill="both", expand=True)
-        self.details.tag_configure("h", font=("TkDefaultFont", 11, "bold"))
-        self.details.tag_configure("label", foreground="#666666")
-        self.details.tag_configure("link", foreground="#1a5fb4", underline=True)
+        self.details = tk.Text(bottom, height=8, wrap="word", state="disabled", relief="flat", padx=10, pady=8,
+                               highlightthickness=0, borderwidth=0, font="TkDefaultFont", cursor="")
+        self.details.pack(fill="both", expand=True, pady=(0, 10))
         self.details.tag_bind("link", "<Enter>", lambda e: self.details.config(cursor="hand2"))
         self.details.tag_bind("link", "<Leave>", lambda e: self.details.config(cursor=""))
-        self._links = 0
         self._update_buttons()
+
+    def _check(self, parent, text: str) -> tk.BooleanVar:
+        v = tk.BooleanVar(value=False)
+        v.trace_add("write", lambda *_: self.render())
+        ttk.Checkbutton(parent, text=text, variable=v).pack(side="left", padx=3)
+        return v
 
     def _keys(self) -> None:
         r = self.root
         r.bind("<F5>", lambda e: self.refresh())
+        r.bind("<Shift-F5>", lambda e: self.refresh(full=True))
         r.bind("<Control-f>", lambda e: (self.search_entry.focus_set(), self.search_entry.select_range(0, "end")))
         r.bind("<Control-e>", lambda e: self.export_view())
         r.bind("<Control-Return>", lambda e: self.open_pages())
         r.bind("<Escape>", lambda e: self.search.set(""))
-        for t in (self.missing, self.in_quiver, self.blacklisted):
+        for n in range(len(TABS)):
+            r.bind(f"<Control-Key-{n + 1}>", lambda e, n=n: self.tabs.select(n))
+        for t in self.tables.values():
             t.tree.bind("<Delete>", lambda e: self.delete_key())
+            t.tree.bind("<BackSpace>", lambda e: self.undecide_selected())
+            t.tree.bind("<KeyPress-w>", lambda e: self.wait_selected())
             t.tree.bind("<Control-c>", lambda e: self.copy_urls())
             t.tree.bind("<Control-a>", lambda e, t=t: t.tree.selection_set(t.tree.get_children()))
 
     def shortcuts(self) -> None:
         messagebox.showinfo("Keyboard shortcuts", "\n".join([
-            "F5\tRefresh every source",
+            "F5\tRefresh (only what changed)",
+            "Shift+F5\tFull refresh (read everything again)",
             "Enter / double-click\tOpen repository",
             "Ctrl+Enter\tOpen the listing site pages",
             "Ctrl+C\tCopy URLs of the selected rows",
-            "Delete\tBlacklist (or un-blacklist on the Blacklist tab)",
+            "W\tWait for it (on Waiting: change why)",
+            "Delete\tBlacklist (on Waiting and Blacklist: back to the list)",
+            "Backspace\tBack to the list, from Waiting or Blacklist",
             "Ctrl+A\tSelect every row in the list",
-            "Ctrl+F\tSearch",
-            "Esc\tClear the search",
+            "Ctrl+1 … Ctrl+5\tSwitch tabs",
+            "Ctrl+F / Esc\tSearch / clear the search",
             "Ctrl+E\tExport the current list as CSV",
-            "Right-click\tMore actions",
+            "Right-click a row\tMore actions",
+            "Right-click a heading\tShow or hide columns",
         ]))
 
+    # ---- theme ---------------------------------------------------------------------------------------------------
+
+    def set_theme(self) -> None:
+        self.store.settings["theme"] = self.theme_var.get()
+        self.store.save_settings()
+        self.c = theme.apply(self.root, self.theme_var.get())
+        self.recolor()
+
+    def recolor(self) -> None:
+        c = self.c
+        theme.style_menu(self.menubar, c)
+        for t in self.tables.values():
+            t.colors(c)
+        for text in (self.details, self.logbox):
+            text.configure(background=c["surface"], foreground=c["fg"], insertbackground=c["fg"],
+                           selectbackground=c["select"], selectforeground=c["on_select"])
+        d = self.details
+        d.configure(background=c["bg"])
+        d.tag_configure("h", font=c["fonts"]["heading"])
+        d.tag_configure("label", foreground=c["muted"])
+        d.tag_configure("link", foreground=c["link"], underline=True)
+        d.tag_configure("flag", foreground=c["good"])
+        d.tag_configure("warn", foreground=c["error"])
+        self.logbox.tag_configure("error", foreground=c["error"])
+
     # ---- data ----------------------------------------------------------------------------------------------------
+
+    def _focus(self, event) -> None:
+        # Another maintainer (or a sync) may have changed the shared decisions file.
+        if event.widget is self.root and self.store.decisions.reload():
+            self.reload()
+            self.status.config(text="Decisions file changed on disk; reloaded.", style="TLabel")
 
     def reload(self) -> None:
         self.result = engine.compare(self.store)
         self.candidates = {c.key: c for c in self.result.candidates}
-        r = self.result
-        if r.refreshed_at:
-            prev = f" (previous: {r.previous_refresh})" if r.previous_refresh else ""
-            self.refreshed.config(text=f"Last refresh: {r.refreshed_at}{prev}")
-        if r.errors:
-            self.status.config(text="Last refresh had errors, see the Log tab", foreground="#b00020")
+        self.quiver_rows = {f"q{n}": q for n, q in enumerate(self.result.quiver)}
+        r = self.result.refresh
+        if r.get("refreshed_at"):
+            prev = f" (previous: {r['previous_refresh']})" if r.get("previous_refresh") else ""
+            self.refreshed.config(text=f"Last refresh {r['refreshed_at']}{prev}")
+        if r.get("errors"):
+            self.status.config(text="Last refresh had errors, see the Log tab", style="Error.TLabel")
         self.render()
+
+    def _search_soon(self) -> None:
+        if self._search_after:
+            self.root.after_cancel(self._search_after)
+        self._search_after = self.root.after(250, self.render)
 
     def _matches(self, text: str, *fields: str) -> bool:
         return all(any(word in (f or "").lower() for f in fields) for word in text.split())
 
-    def render(self) -> None:
+    def _filtered(self, cands: list[Candidate], site_filters: bool) -> list[Candidate]:
         r = self.result
-        if not r:
-            return
         text = self.search.get().strip().lower()
         sources = {s for s, v in self.source_vars.items() if v.get()}
+        out = []
+        for c in cands:
+            if site_filters:
+                if c.sources and not sources.intersection(c.sources):
+                    continue
+                if self.new_only.get() and not r.is_new(c):
+                    continue
+                if self.has_release.get() and not c.released:
+                    continue
+                if self.hide_same_game.get() and c.same_game:
+                    continue
+                if self.multi_only.get() and len(c.sources) < 2:
+                    continue
+            d = c.decision or {}
+            if text and not self._matches(text, c.title, c.game, c.url, c.author, c.platform, c.method,
+                                          d.get("note", ""), d.get("by", "")):
+                continue
+            out.append(c)
+        return out
 
-        missing_rows = []
-        for c in r.missing:
-            if not sources.intersection(c.sources):
-                continue
-            if self.new_only.get() and not r.is_new(c):
-                continue
-            if self.hide_same_game.get() and c.same_game:
-                continue
-            if self.multi_only.get() and len(c.sources) < 2:
-                continue
-            if text and not self._matches(text, c.title, c.game, c.url, c.author, c.platform, c.method):
-                continue
-            seen = "" if c.first_seen == "initial" else c.first_seen
-            values = (c.title, c.game, c.platform, c.method, ", ".join(EXTERNAL[s] for s in c.sources), c.url, seen,
-                      f"yes ({len(c.same_game)})" if c.same_game else "")
-            missing_rows.append((c.key, values, ("new",) if r.is_new(c) else ()))
-        self.missing.fill(missing_rows)
+    def _values(self, c: Candidate) -> dict:
+        d = c.decision or {}
+        if c.in_quiver:
+            state = "in Quiver now"
+        elif not c.listed:
+            state = "no longer listed"
+        else:
+            state = ""
+        return {
+            "title": c.title, "game": c.game, "platform": c.platform, "method": c.method,
+            "sources": ", ".join(EXTERNAL[s] for s in c.sources), "host": c.host, "released": c.released,
+            "version": c.version, "pushed": c.pushed, "added": c.added,
+            "first_seen": "" if c.first_seen == "initial" else c.first_seen,
+            "same_game": f"yes ({len(c.same_game)})" if c.same_game else "",
+            "reason": WAIT_REASONS.get(d.get("reason", ""), d.get("reason", "")), "note": d.get("note", ""),
+            "since": d.get("date", ""), "by": d.get("by", ""), "state": state, "url": c.url,
+        }
 
-        also: dict[str, list[str]] = {}
-        for c in r.candidates:
-            for q in c.in_quiver:
-                also.setdefault(q.key, [])
-                for s in c.sources:
-                    if EXTERNAL[s] not in also[q.key]:
-                        also[q.key].append(EXTERNAL[s])
-        self.quiver_rows = {}
-        quiver_rows = []
-        for n, q in enumerate(r.quiver):
-            if text and not self._matches(text, q.title, q.game, q.url, q.slug, q.author):
-                continue
-            iid = f"q{n}"
-            self.quiver_rows[iid] = q
-            quiver_rows.append((iid, (q.title, q.game, q.url, ", ".join(also.get(q.key, [])), q.slug), ()))
-        self.in_quiver.fill(quiver_rows)
+    def _lists(self) -> dict[str, list[Candidate]]:
+        r = self.result
+        return {
+            "missing": self._filtered(r.missing, True),
+            "other": self._filtered(r.other_sites, True),
+            "waiting": self._filtered(r.decided(WAITING), False),
+            "blacklist": self._filtered(r.decided(BLACKLIST), False),
+        }
 
-        black_rows = []
-        listed = {c.key for c in r.candidates}
-        for key, b in self.store.blacklist.items():
-            if text and not self._matches(text, b.get("title"), b.get("game"), b.get("url"), b.get("reason")):
-                continue
-            c = self.candidates.get(key)
-            tags = () if key in listed else ("dim",)
-            black_rows.append((key, (b.get("title", ""), b.get("game", ""), b.get("url", ""), b.get("reason", ""),
-                                     b.get("date", "")), tags))
-        self.blacklisted.fill(black_rows)
+    def render(self) -> None:
+        """Count every list; fill only the one on screen (the others when they're shown)."""
+        if not self.result:
+            return
+        r = self.result
+        self.lists = self._lists()
+        text = self.search.get().strip().lower()
+        self.quiver_shown = [iid for iid, q in self.quiver_rows.items()
+                             if not text or self._matches(text, q.title, q.game, q.url, q.slug, q.author)]
+        totals = {"missing": len(r.missing), "other": len(r.other_sites), "waiting": len(r.decided(WAITING)),
+                  "blacklist": len(r.decided(BLACKLIST)), "quiver": len(r.quiver)}
+        for tab, table in self.tables.items():
+            shown = len(self.quiver_shown) if tab == "quiver" else len(self.lists[tab])
+            label = f"{TABS[tab][0]}  {shown}" + (f" / {totals[tab]}" if shown != totals[tab] else "")
+            self.tabs.tab(table, text=label)
+        new = sum(1 for c in r.missing + r.other_sites if r.is_new(c))
+        self.count.config(text=f"{sum(1 for c in r.candidates if c.listed)} listed elsewhere · "
+                               f"{len(r.missing)} missing · {new} new")
+        self.dirty = set(TABS)
+        self._fill(self.current())
+        self.show_details()
 
-        new = sum(1 for c in r.missing if r.is_new(c))
-        self.tabs.tab(self.missing, text=f"Missing ({len(missing_rows)}" + (f" / {len(r.missing)})" if len(missing_rows) != len(r.missing) else ")"))
-        self.tabs.tab(self.in_quiver, text=f"In Quiver ({len(r.quiver)})")
-        self.tabs.tab(self.blacklisted, text=f"Blacklist ({len(self.store.blacklist)})")
-        self.count.config(text=f"{len(r.candidates)} on other sites · {len(r.missing)} missing · {new} new")
+    def _fill(self, tab: str) -> None:
+        if tab not in self.dirty:
+            return
+        self.dirty.discard(tab)
+        r = self.result
+        if tab == "quiver":
+            also: dict[str, list[str]] = {}
+            for c in r.candidates:
+                for q in c.in_quiver:
+                    for s in c.sources:
+                        if EXTERNAL[s] not in also.setdefault(q.key, []):
+                            also[q.key].append(EXTERNAL[s])
+            rows = []
+            for iid in self.quiver_shown:
+                q = self.quiver_rows[iid]
+                rows.append((iid, {"title": q.title, "game": q.game, "released": q.released, "version": q.version,
+                                   "added": q.added, "also_on": ", ".join(also.get(q.key, [])), "slug": q.slug,
+                                   "url": q.url}, ()))
+            self.tables[tab].fill(rows)
+            return
+        rows = []
+        for c in self.lists[tab]:
+            tags = ()
+            if tab in ("missing", "other") and r.is_new(c):
+                tags = ("new",)
+            elif tab in ("waiting", "blacklist"):
+                tags = ("flag",) if c.in_quiver else ("dim",) if not c.listed else ()
+            rows.append((c.key, self._values(c), tags))
+        self.tables[tab].fill(rows)
+
+    def _tab_changed(self) -> None:
+        if self.result and self.current() in TABS:
+            self._fill(self.current())
+        self._update_buttons()
         self.show_details()
 
     # ---- selection and actions -----------------------------------------------------------------------------------
 
     def current(self) -> str:
-        return {0: "missing", 1: "quiver", 2: "blacklist"}.get(self.tabs.index(self.tabs.select()), "log")
+        i = self.tabs.index(self.tabs.select())
+        return list(TABS)[i] if i < len(TABS) else "log"
 
-    def _table(self) -> Table | None:
-        return {"missing": self.missing, "quiver": self.in_quiver, "blacklist": self.blacklisted}.get(self.current())
+    def selected_candidates(self) -> list[Candidate]:
+        t = self.tables.get(self.current())
+        if not t or self.current() == "quiver":
+            return []
+        return [self.candidates[k] for k in t.selection() if k in self.candidates]
 
-    def selected(self) -> list[tuple[str, str, list[str], str]]:
-        """(key, url, listing pages, title) for each selected row."""
-        t = self._table()
-        out = []
-        for iid in t.selection() if t else []:
-            if self.current() == "quiver":
-                q = self.quiver_rows.get(iid)
-                if q:
-                    c = self.candidates.get(q.key)
-                    out.append((q.key, q.url, [q.page] + (list(c.pages.values()) if c else []), q.title))
-            else:
-                c = self.candidates.get(iid)
-                b = self.store.blacklist.get(iid, {})
-                out.append((iid, c.url if c else b.get("url", ""), list(c.pages.values()) if c else [],
-                            c.title if c else b.get("title", "")))
-        return out
+    def selected_links(self) -> list[tuple[str, list[str]]]:
+        """(repository URL, listing pages) of each selected row."""
+        if self.current() == "quiver":
+            out = []
+            for iid in self.tables["quiver"].selection():
+                q = self.quiver_rows[iid]
+                c = self.candidates.get(q.key)
+                out.append((q.url, [q.page] + (list(c.pages.values()) if c else [])))
+            return out
+        return [(c.url, list(c.pages.values())) for c in self.selected_candidates()]
 
     def _update_buttons(self) -> None:
         cur = self.current()
-        state = lambda on: "normal" if on else "disabled"  # noqa: E731
+        on = lambda yes: "normal" if yes else "disabled"  # noqa: E731
         for b in (self.btn_open, self.btn_pages, self.btn_copy):
-            b.config(state=state(cur != "log"))
-        self.btn_black.config(state=state(cur == "missing"))
-        self.btn_unblack.config(state=state(cur == "blacklist"))
+            b.config(state=on(cur != "log"))
+        self.btn_wait.config(state=on(cur in ("missing", "other", "waiting", "blacklist")),
+                             text="Change why…  W" if cur == "waiting" else "Wait…  W")
+        self.btn_black.config(state=on(cur in ("missing", "other", "waiting")))
+        self.btn_back.config(state=on(cur in ("waiting", "blacklist")))
 
     def open_repo(self) -> None:
-        rows = self.selected()
-        if len(rows) > 10 and not messagebox.askyesno("Open links", f"Open {len(rows)} repositories in your browser?"):
+        links = self.selected_links()
+        if len(links) > 10 and not messagebox.askyesno("Open links", f"Open {len(links)} repositories in your browser?"):
             return
-        for _, url, _, _ in rows:
+        for url, _ in links:
             open_url(url)
 
     def open_pages(self) -> None:
-        pages = [p for _, _, ps, _ in self.selected() for p in ps if p]
+        pages = [p for _, ps in self.selected_links() for p in ps if p]
         if len(pages) > 10 and not messagebox.askyesno("Open links", f"Open {len(pages)} pages in your browser?"):
             return
         for p in pages:
             open_url(p)
 
     def copy_urls(self) -> None:
-        urls = [url for _, url, _, _ in self.selected()]
+        urls = [url for url, _ in self.selected_links()]
         if urls:
             self.root.clipboard_clear()
             self.root.clipboard_append("\n".join(urls))
-            self.status.config(text=f"Copied {len(urls)} URL(s)", foreground="")
+            self.status.config(text=f"Copied {len(urls)} URL(s)", style="TLabel")
 
     def delete_key(self) -> None:
-        if self.current() == "missing":
+        if self.current() in ("missing", "other"):
             self.blacklist_selected()
-        elif self.current() == "blacklist":
-            self.unblacklist_selected()
+        elif self.current() in ("waiting", "blacklist"):
+            self.undecide_selected()
 
-    def blacklist_selected(self) -> None:
-        if self.current() != "missing":
+    def _next_row_after(self, keys: list[str]) -> str | None:
+        tree = self.tables[self.current()].tree
+        children = list(tree.get_children())
+        if not keys or keys[-1] not in children:
+            return None
+        rest = [i for i in children[children.index(keys[-1]) + 1:] if i not in keys]
+        before = [i for i in children[:children.index(keys[0])] if i not in keys]
+        return (rest or before[-1:] or [None])[0]
+
+    def _after_decision(self, keys: list[str], message: str) -> None:
+        """Re-render, keeping the cursor where it was, so you can work down the list from the keyboard."""
+        tab = self.current()
+        nxt = self._next_row_after(keys)
+        self.result = engine.compare(self.store)
+        self.candidates = {c.key: c for c in self.result.candidates}
+        self.render()
+        tree = self.tables[tab].tree
+        if nxt and tree.exists(nxt):
+            tree.selection_set(nxt)
+            tree.focus(nxt)
+            tree.see(nxt)
+        tree.focus_set()
+        self.status.config(text=message, style="TLabel")
+
+    def _describe(self, cands: list[Candidate]) -> str:
+        return (cands[0].title or cands[0].url) if len(cands) == 1 else f"{len(cands)} projects"
+
+    def wait_selected(self) -> None:
+        if self.current() not in ("missing", "other", "waiting", "blacklist"):
             return
-        keys = self.missing.selection()
-        cands = [self.candidates[k] for k in keys if k in self.candidates]
+        cands = self.selected_candidates()
         if not cands:
             return
-        what = cands[0].title or cands[0].url if len(cands) == 1 else f"{len(cands)} projects"
-        reason = simpledialog.askstring("Blacklist", f"Blacklist {what}?\n\nReason (optional):", parent=self.root)
-        if reason is None:
+        d = cands[0].decision or {}
+        editing = self.current() == "waiting"
+        default = d.get("reason") if editing else ("host" if self.current() == "other" else "")
+        dlg = DecisionDialog(self, "Wait", f"Wait for {self._describe(cands)}?", WAIT_REASONS, reason=default or "",
+                             note=d.get("note", "") if editing and len(cands) == 1 else "")
+        if not dlg.result:
             return
-        # Keep the cursor near where it was, for working down the list.
-        children = self.missing.tree.get_children()
-        after = [i for i in children[children.index(keys[-1]) + 1:] if i not in keys][:1] if keys[-1] in children else []
-        engine.blacklist(self.store, cands, reason.strip())
-        self.status.config(text=f"Blacklisted {what}", foreground="")
-        self.render()
-        if after and self.missing.tree.exists(after[0]):
-            self.missing.tree.selection_set(after[0])
-            self.missing.tree.focus(after[0])
-            self.missing.tree.see(after[0])
-        self.missing.tree.focus_set()
+        engine.decide(self.store, WAITING, cands, reason=dlg.result[0], note=dlg.result[1])
+        keys = [c.key for c in cands]
+        self._after_decision(keys, f"Waiting for {self._describe(cands)}: {WAIT_REASONS[dlg.result[0]]}")
 
-    def unblacklist_selected(self) -> None:
-        keys = self.blacklisted.selection()
-        if not keys:
+    def blacklist_selected(self) -> None:
+        if self.current() not in ("missing", "other", "waiting"):
             return
-        engine.unblacklist(self.store, keys)
-        self.reload()
-        self.status.config(text=f"Removed {len(keys)} from the blacklist", foreground="")
+        cands = self.selected_candidates()
+        if not cands:
+            return
+        dlg = DecisionDialog(self, "Blacklist", f"Blacklist {self._describe(cands)}?")
+        if not dlg.result:
+            return
+        engine.decide(self.store, BLACKLIST, cands, note=dlg.result[1])
+        self._after_decision([c.key for c in cands], f"Blacklisted {self._describe(cands)}")
+
+    def undecide_selected(self) -> None:
+        if self.current() not in ("waiting", "blacklist"):
+            return
+        cands = self.selected_candidates()
+        if not cands:
+            return
+        engine.undecide(self.store, [c.key for c in cands])
+        self._after_decision([c.key for c in cands], f"{self._describe(cands)} back in the list")
 
     def context_menu(self, event) -> None:
         tree = event.widget
         row = tree.identify_row(event.y)
         if row and row not in tree.selection():
             tree.selection_set(row)
+        cur = self.current()
         m = tk.Menu(self.root, tearoff=False)
         m.add_command(label="Open repository", command=self.open_repo)
         m.add_command(label="Open listing pages", command=self.open_pages)
         m.add_command(label="Copy URL", command=self.copy_urls)
-        if self.current() == "missing":
+        if cur in ("missing", "other", "waiting", "blacklist"):
             m.add_separator()
-            m.add_command(label="Blacklist…", command=self.blacklist_selected)
-            sel = self.selected()
-            if len(sel) == 1:
-                c = self.candidates.get(sel[0][0])
-                for q in (c.same_game if c else [])[:8]:
-                    m.add_command(label=f"Open Quiver's repo for the same game: {q.title}", command=lambda u=q.url: open_url(u))
-        elif self.current() == "blacklist":
-            m.add_separator()
-            m.add_command(label="Remove from blacklist", command=self.unblacklist_selected)
+            if cur in ("missing", "other", "blacklist"):
+                wait = tk.Menu(m, tearoff=False)
+                for rid, label in WAIT_REASONS.items():
+                    wait.add_command(label=label, command=lambda r=rid: self._quick_wait(r))
+                wait.add_separator()
+                wait.add_command(label="With a note…", command=self.wait_selected)
+                m.add_cascade(label="Wait for…", menu=wait)
+            else:
+                m.add_command(label="Change why…", command=self.wait_selected)
+            if cur != "blacklist":
+                m.add_command(label="Blacklist…", command=self.blacklist_selected)
+            if cur in ("waiting", "blacklist"):
+                m.add_command(label="Back to the list", command=self.undecide_selected)
+            cands = self.selected_candidates()
+            if len(cands) == 1 and cands[0].same_game:
+                m.add_separator()
+                for q in cands[0].same_game[:8]:
+                    m.add_command(label=f"Quiver has the same game: {q.title}", command=lambda u=q.url: open_url(u))
         m.tk_popup(event.x_root, event.y_root)
+
+    def _quick_wait(self, reason: str) -> None:
+        cands = self.selected_candidates()
+        if cands:
+            engine.decide(self.store, WAITING, cands, reason=reason)
+            self._after_decision([c.key for c in cands], f"Waiting for {self._describe(cands)}: {WAIT_REASONS[reason]}")
 
     # ---- details pane --------------------------------------------------------------------------------------------
 
@@ -462,87 +725,119 @@ class App:
         self.details.insert("end", text, ("link", tag))
         self.details.tag_bind(tag, "<Button-1>", lambda e, u=url: open_url(u))
 
+    def _line(self, label: str) -> None:
+        self.details.insert("end", f"\n{label}  ", "label")
+
     def show_details(self) -> None:
         d = self.details
         d.config(state="normal")
         d.delete("1.0", "end")
-        sel = self.selected() if self.current() != "log" else []
-        if len(sel) == 1:
-            key = sel[0][0]
-            c = self.candidates.get(key)
-            if self.current() == "quiver":
-                q = self.quiver_rows[self._table().selection()[0]]
-                d.insert("end", q.title, "h")
-                d.insert("end", f"   {q.game}\n")
-                d.insert("end", "Repository: ", "label")
-                self._link(q.url, q.url)
-                d.insert("end", "\nQuiver page: ", "label")
-                self._link(q.page, q.page)
-                if q.author:
-                    d.insert("end", f"\nDeveloper: {q.author}", "label")
-                if c:
-                    d.insert("end", "\nAlso listed on: ", "label")
-                    for s, page in c.pages.items():
-                        self._link(EXTERNAL[s], page)
-                        d.insert("end", "  ")
-            elif c or key in self.store.blacklist:
-                b = self.store.blacklist.get(key)
-                d.insert("end", (c.title if c else b.get("title")) or "(no name)", "h")
-                game = c.game if c else b.get("game", "")
-                if game:
-                    d.insert("end", f"   {game}" + (f" ({c.platform})" if c and c.platform else ""))
-                d.insert("end", "\nRepository: ", "label")
-                self._link(sel[0][1], sel[0][1])
-                if c:
-                    facts = [f for f in (c.method, f"by {c.author}" if c.author else "", f"added {c.added}" if c.added else "") if f]
-                    if facts:
-                        d.insert("end", "   " + " · ".join(facts), "label")
-                    d.insert("end", "\nListed on: ", "label")
-                    for s in c.sources:
-                        page = c.pages.get(s)
-                        if page:
-                            self._link(EXTERNAL[s], page)
-                        else:
-                            d.insert("end", EXTERNAL[s])
-                        d.insert("end", "  ")
-                    if c.same_game:
-                        d.insert("end", "\nQuiver already has this game from another repository: ", "label")
-                        for q in c.same_game[:6]:
-                            self._link(q.title, q.url)
-                            d.insert("end", "  ")
-                    if c.in_quiver:
-                        d.insert("end", "\nAlready in Quiver as: ", "label")
-                        for q in c.in_quiver:
-                            self._link(q.title, q.page or q.url)
-                            d.insert("end", "  ")
-                else:
-                    d.insert("end", "\nNo listing site has it any more.", "label")
-                if b:
-                    d.insert("end", f"\nBlacklisted {b.get('date', '')}" + (f": {b['reason']}" if b.get("reason") else ""), "label")
-        elif len(sel) > 1:
-            d.insert("end", f"{len(sel)} selected", "h")
-        d.config(state="disabled")
+        cur = self.current()
+        try:
+            if cur == "quiver":
+                sel = self.tables["quiver"].selection()
+                if len(sel) == 1:
+                    self._quiver_details(self.quiver_rows[sel[0]])
+                elif sel:
+                    d.insert("end", f"{len(sel)} selected", "h")
+            elif cur in TABS:
+                cands = self.selected_candidates()
+                if len(cands) == 1:
+                    self._candidate_details(cands[0])
+                elif cands:
+                    d.insert("end", f"{len(cands)} selected", "h")
+        finally:
+            d.config(state="disabled")
+
+    def _quiver_details(self, q: Item) -> None:
+        d = self.details
+        d.insert("end", q.title, "h")
+        d.insert("end", f"   {q.game}")
+        self._line("Repository")
+        self._link(q.url, q.url)
+        self._line("Quiver page")
+        self._link(q.page, q.page)
+        facts = [f for f in (f"latest release {q.version} on {q.released}" if q.released else "",
+                             f"added {q.added}" if q.added else "", f"by {q.author}" if q.author else "") if f]
+        if facts:
+            self._line("About")
+            d.insert("end", " · ".join(facts))
+        c = self.candidates.get(q.key)
+        if c and c.sources:
+            self._line("Also listed on")
+            for s in c.sources:
+                self._link(EXTERNAL[s], c.pages.get(s, ""))
+                d.insert("end", "   ")
+
+    def _candidate_details(self, c: Candidate) -> None:
+        d = self.details
+        d.insert("end", c.title or "(no name)", "h")
+        if c.game:
+            d.insert("end", f"   {c.game}" + (f" ({c.platform})" if c.platform else ""))
+        self._line("Repository")
+        self._link(c.url, c.url)
+        if not c.supported_host:
+            d.insert("end", f"   {c.host} isn't a code host Quiver reads", "warn")
+        facts = [f for f in (c.method, f"by {c.author}" if c.author else "") if f]
+        if facts:
+            d.insert("end", "   " + " · ".join(facts), "label")
+        for s in c.sources:
+            i = c.listings[s]
+            self._line(EXTERNAL[s])
+            if c.pages.get(s):
+                self._link("page", c.pages[s])
+                d.insert("end", "   ")
+            bits = [f"release {i.version or '?'} on {i.released}" if i.released else "",
+                    f"last push {i.pushed}" if i.pushed else "", f"listed {i.added}" if i.added else ""]
+            bits += [f"{k} {v}" for k, v in i.extra.items() if k in ("builds", "stars", "status", "completeness", "ai")]
+            d.insert("end", " · ".join(b for b in bits if b))
+            if i.source == "decompbuddy" and not i.extra.get("builds"):
+                d.insert("end", "   no builds published", "warn")
+        if not c.listed:
+            self._line("Listed on")
+            d.insert("end", "no listing site has it any more", "label")
+        if c.in_quiver:
+            self._line("In Quiver as")
+            for q in c.in_quiver:
+                self._link(q.title, q.page or q.url)
+                d.insert("end", "   ")
+            d.insert("end", "(you can take it off this list)", "flag")
+        elif c.same_game:
+            self._line("Quiver has this game from")
+            for q in c.same_game[:6]:
+                self._link(q.title, q.url)
+                d.insert("end", "   ")
+        dec = c.decision
+        if dec:
+            self._line("Waiting for" if dec.get("list") == WAITING else "Blacklisted")
+            what = WAIT_REASONS.get(dec.get("reason", ""), "") if dec.get("list") == WAITING else ""
+            d.insert("end", " · ".join(x for x in (what, dec.get("note", ""), f"since {dec.get('date', '')}",
+                                                    f"by {dec['by']}" if dec.get("by") else "") if x))
 
     # ---- refresh -------------------------------------------------------------------------------------------------
 
-    def log(self, message: str) -> None:
+    def log(self, message: str, error: bool = False) -> None:
         self.logbox.config(state="normal")
-        self.logbox.insert("end", message + "\n")
+        self.logbox.insert("end", message + "\n", ("error",) if error else ())
         self.logbox.see("end")
         self.logbox.config(state="disabled")
 
-    def refresh(self) -> None:
+    def refresh(self, full: bool = False) -> None:
         if self.refreshing:
+            return
+        if full and not messagebox.askyesno(
+                "Full refresh", "Read everything again, ignoring what's cached? PlayPorted alone is about 2,100 pages "
+                "and takes a few minutes."):
             return
         self.refreshing = True
         self.refresh_btn.config(state="disabled")
-        self.status.config(text="Refreshing…", foreground="")
-        self.log("--- Refresh started")
+        self.status.config(text="Refreshing…", style="TLabel")
+        self.log("--- Full refresh started" if full else "--- Refresh started")
 
         def work():
             try:
-                snap = engine.refresh(self.store, lambda m, d=0, t=0: self.events.put(("progress", m, d, t)))
-                self.events.put(("done", snap, 0, 0))
+                result = engine.refresh(self.store, lambda m, d=0, t=0: self.events.put(("progress", m, d, t)), full=full)
+                self.events.put(("done", result, 0, 0))
             except Exception as e:  # noqa: BLE001
                 self.events.put(("failed", str(e), 0, 0))
 
@@ -556,30 +851,30 @@ class App:
                 kind, a, done, total = self.events.get_nowait()
                 if kind == "progress":
                     last_progress = (a, done, total)
-                    if not a.split(":")[-1].strip().startswith(("port pages", "game records")):
-                        self.log(a)
-                elif kind == "done":
+                    if not NOISY.search(a):
+                        self.log(a, error="failed" in a)
+                elif kind in ("done", "failed"):
                     self.refreshing = False
                     self.refresh_btn.config(state="normal")
+                    self.progress.stop()
                     self.progress.config(mode="determinate", value=0)
+                    if kind == "failed":
+                        self.log("ERROR " + a, error=True)
+                        self.status.config(text=f"Refresh failed: {a}", style="Error.TLabel")
+                        return
                     for e in a.get("errors", []):
-                        self.log("ERROR " + e)
+                        self.log("ERROR " + e, error=True)
+                    took = sum(s.get("seconds", 0) for s in a.get("sources", {}).values())
+                    self.log(f"Finished in {took:.0f} s. {a.get('new', 0)} project(s) seen for the first time.")
                     self.reload()
-                    new = sum(1 for c in self.result.missing if self.result.is_new(c))
                     if not a.get("errors"):
-                        self.status.config(text=f"Refreshed. {new} new project(s) missing from Quiver.", foreground="")
-                    return
-                elif kind == "failed":
-                    self.refreshing = False
-                    self.refresh_btn.config(state="normal")
-                    self.log("ERROR " + a)
-                    self.status.config(text=f"Refresh failed: {a}", foreground="#b00020")
+                        self.status.config(text=f"Refreshed. {a.get('new', 0)} new project(s).", style="TLabel")
                     return
         except queue.Empty:
             pass
         if last_progress:
             msg, done, total = last_progress
-            self.status.config(text=msg, foreground="")
+            self.status.config(text=msg, style="TLabel")
             if total:
                 self.progress.stop()
                 self.progress.config(mode="determinate", maximum=total, value=done)
@@ -596,31 +891,33 @@ class App:
 
     def export_view(self) -> None:
         cur = self.current()
+        if cur == "log":
+            return
+        self._fill(cur)
         if cur == "quiver":
-            items = [self.quiver_rows[i] for i in self.in_quiver.tree.get_children()]
+            items = [self.quiver_rows[i] for i in self.tables["quiver"].tree.get_children()]
             path = self._ask_path("quiver-catalog.csv")
             if path:
                 n = engine.write_quiver_csv(path, items)
-                self.status.config(text=f"Wrote {n} rows to {path}", foreground="")
+                self.status.config(text=f"Wrote {n} rows to {path}", style="TLabel")
             return
-        table = self.blacklisted if cur == "blacklist" else self.missing
-        rows = [self.candidates[k] for k in table.tree.get_children() if k in self.candidates]
-        path = self._ask_path("blacklist.csv" if cur == "blacklist" else "missing.csv")
+        rows = [self.candidates[k] for k in self.tables[cur].tree.get_children() if k in self.candidates]
+        path = self._ask_path(f"{cur}.csv")
         if path:
             n = engine.write_candidates_csv(path, rows)
-            self.status.config(text=f"Wrote {n} rows to {path}", foreground="")
+            self.status.config(text=f"Wrote {n} rows to {path}", style="TLabel")
 
     def export_all(self) -> None:
         path = self._ask_path("all-projects.csv")
         if path and self.result:
             n = engine.write_candidates_csv(path, self.result.candidates)
-            self.status.config(text=f"Wrote {n} rows to {path}", foreground="")
+            self.status.config(text=f"Wrote {n} rows to {path}", style="TLabel")
 
     def export_quiver(self) -> None:
         path = self._ask_path("quiver-catalog.csv")
         if path and self.result:
             n = engine.write_quiver_csv(path, self.result.quiver)
-            self.status.config(text=f"Wrote {n} rows to {path}", foreground="")
+            self.status.config(text=f"Wrote {n} rows to {path}", style="TLabel")
 
     def settings_dialog(self) -> None:
         s = self.store.settings
@@ -628,61 +925,66 @@ class App:
         w.title("Settings")
         w.transient(self.root)
         w.resizable(False, False)
-        body = ttk.Frame(w, padding=12)
+        body = ttk.Frame(w, padding=16)
         body.pack(fill="both")
+        bold = self.c["fonts"]["bold"]
 
-        ttk.Label(body, text="Sites to read on Refresh", font=("TkDefaultFont", 10, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Label(body, text="Sites to read on Refresh", font=bold).grid(row=0, column=0, columnspan=3, sticky="w")
         src = {}
         for n, (sid, label) in enumerate(EXTERNAL.items(), start=1):
             src[sid] = tk.BooleanVar(value=s["sources"].get(sid, True))
-            ttk.Checkbutton(body, text=label, variable=src[sid]).grid(row=n, column=0, columnspan=3, sticky="w")
+            ttk.Checkbutton(body, text=label, variable=src[sid]).grid(row=n, column=0, columnspan=3, sticky="w", pady=1)
         row = len(EXTERNAL) + 1
         full = tk.BooleanVar(value=bool(s.get("unbaked_full_scan")))
         ttk.Checkbutton(body, text="unbaked: read every game's record, not only recent additions\n"
-                        "(about 6,000 requests the first time; later only changed games)", variable=full).grid(
+                        "(about 6,000 requests the first time; later only games with new pushes)", variable=full).grid(
             row=row, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
         def path_row(r, label, value, hint, save):
-            ttk.Label(body, text=label, font=("TkDefaultFont", 10, "bold")).grid(row=r, column=0, columnspan=3, sticky="w", pady=(12, 0))
-            ttk.Label(body, text=hint, foreground="#666666").grid(row=r + 1, column=0, columnspan=3, sticky="w")
+            ttk.Label(body, text=label, font=bold).grid(row=r, column=0, columnspan=3, sticky="w", pady=(14, 0))
+            ttk.Label(body, text=hint, style="Muted.TLabel").grid(row=r + 1, column=0, columnspan=3, sticky="w")
             var = tk.StringVar(value=value)
-            ttk.Entry(body, textvariable=var, width=60).grid(row=r + 2, column=0, sticky="we")
+            ttk.Entry(body, textvariable=var, width=60).grid(row=r + 2, column=0, sticky="we", pady=(4, 0))
+            kind = ("JSON", "*.json") if save else ("CSV", "*.csv")
+            ask = filedialog.asksaveasfilename if save else filedialog.askopenfilename
             ttk.Button(body, text="Browse…", command=lambda: var.set(
-                (filedialog.asksaveasfilename if save else filedialog.askopenfilename)(
-                    parent=w, filetypes=[("CSV" if not save else "JSON", "*.csv" if not save else "*.json"), ("All files", "*.*")])
-                or var.get())).grid(row=r + 2, column=1, padx=4)
+                ask(parent=w, filetypes=[kind, ("All files", "*.*")]) or var.get())).grid(row=r + 2, column=1, padx=4)
             ttk.Button(body, text="Clear", command=lambda: var.set("")).grid(row=r + 2, column=2)
             return var
 
         csv_var = path_row(row + 1, "Quiver catalog", s.get("quiver_csv", ""),
                            "Empty: read api.quiverlauncher.com. Or pick a CSV export with a URL column\n"
                            "(and title, game, slug columns if it has them).", False)
-        black_var = path_row(row + 4, "Blacklist file", s.get("blacklist_path", ""),
-                             "Empty: blacklist.json in the data folder. Point it at a shared folder\n"
-                             "(Dropbox, a synced drive, a git checkout) to share it with other maintainers.", True)
+        dec_var = path_row(row + 4, "Decisions file (Waiting and Blacklist)", s.get("decisions_path", ""),
+                           "Empty: decisions.json in the data folder. Point it at a shared folder or a git checkout\n"
+                           "to share it with other maintainers. A file that doesn't exist yet starts with yours.", True)
+        ttk.Label(body, text="Your name", font=bold).grid(row=row + 7, column=0, columnspan=3, sticky="w", pady=(14, 0))
+        ttk.Label(body, text="Put on what you wait for or blacklist, for maintainers sharing the decisions file.",
+                  style="Muted.TLabel").grid(row=row + 8, column=0, columnspan=3, sticky="w")
+        name_var = tk.StringVar(value=s.get("your_name", ""))
+        ttk.Entry(body, textvariable=name_var, width=30).grid(row=row + 9, column=0, sticky="w", pady=(4, 0))
 
         def save():
             s["sources"] = {k: v.get() for k, v in src.items()}
             s["unbaked_full_scan"] = full.get()
             s["quiver_csv"] = csv_var.get().strip()
-            s["blacklist_path"] = black_var.get().strip()
+            s["decisions_path"] = dec_var.get().strip()
+            s["your_name"] = name_var.get().strip()
             self.store.save_settings()
             w.destroy()
             self.reload()
-            self.status.config(text="Settings saved. Refresh (F5) to read the sites with them.", foreground="")
+            self.status.config(text="Settings saved. Refresh (F5) to read the sites with them.", style="TLabel")
 
         buttons = ttk.Frame(body)
-        buttons.grid(row=row + 7, column=0, columnspan=3, sticky="e", pady=(14, 0))
+        buttons.grid(row=row + 10, column=0, columnspan=3, sticky="e", pady=(16, 0))
         ttk.Button(buttons, text="Cancel", command=w.destroy).pack(side="right")
-        ttk.Button(buttons, text="Save", command=save).pack(side="right", padx=6)
+        ttk.Button(buttons, text="Save", style="Accent.TButton", command=save).pack(side="right", padx=6)
+        theme.dark_title_bar(w, self.c["dark"])
         w.grab_set()
 
 
 def run(data_dir: str | None = None) -> int:
     root = tk.Tk()
-    style = ttk.Style(root)
-    if sys.platform.startswith("linux") and "clam" in style.theme_names():
-        style.theme_use("clam")
     App(root, Store(data_dir))
     root.mainloop()
     return 0

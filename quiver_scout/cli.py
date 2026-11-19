@@ -6,8 +6,10 @@ import argparse
 import sys
 
 from . import __version__, engine
-from .sources import quiver
+from .sources import Context, quiver
 from .store import Store
+
+LISTS = ("missing", "other", "waiting", "blacklist", "all")
 
 
 def _progress(message: str, done: int = 0, total: int = 0) -> None:
@@ -17,7 +19,7 @@ def _progress(message: str, done: int = 0, total: int = 0) -> None:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="quiver-scout", description="Find recomps and ports that Quiver Launcher doesn't list yet.")
     p.add_argument("--version", action="version", version=__version__)
-    p.add_argument("--data-dir", help="where settings, cache and blacklist live (default: your user data folder)")
+    p.add_argument("--data-dir", help="where settings, the database and decisions live (default: your user data folder)")
     sub = p.add_subparsers(dest="command")
 
     sub.add_parser("gui", help="open the window (the default)")
@@ -25,13 +27,16 @@ def main(argv: list[str] | None = None) -> int:
     q = sub.add_parser("quiver-csv", help="write Quiver's catalog (title, game, repository URL, ...) to a CSV file")
     q.add_argument("output", nargs="?", default="quiver-catalog.csv")
 
-    sub.add_parser("refresh", help="read every source and save a snapshot")
+    r = sub.add_parser("refresh", help="read every source and save what changed")
+    r.add_argument("--full", action="store_true", help="ignore what's cached and read everything again")
 
-    m = sub.add_parser("missing", help="write projects other sites list and Quiver doesn't to a CSV file")
+    m = sub.add_parser("missing", help="write a list of projects to a CSV file (default: those Quiver is missing)")
     m.add_argument("output", nargs="?", default="missing.csv")
-    m.add_argument("--refresh", action="store_true", help="refresh first instead of using the last snapshot")
+    m.add_argument("--list", choices=LISTS, default="missing",
+                   help="missing (on code hosts Quiver reads), other (other sites), waiting, blacklist, or all")
+    m.add_argument("--refresh", action="store_true", help="refresh first instead of using the last refresh")
     m.add_argument("--new-only", action="store_true", help="only projects first seen in the last refresh")
-    m.add_argument("--all", action="store_true", help="every project, with a status column, not only missing ones")
+    m.add_argument("--all", action="store_true", help="same as --list all")
 
     a = p.parse_args(argv)
     if a.command in (None, "gui"):
@@ -41,24 +46,35 @@ def main(argv: list[str] | None = None) -> int:
 
     store = Store(a.data_dir)
     if a.command == "quiver-csv":
-        items = quiver.from_csv(store.settings["quiver_csv"]) if store.settings.get("quiver_csv") else quiver.fetch(_progress)
+        if store.settings.get("quiver_csv"):
+            items = quiver.from_csv(store.settings["quiver_csv"])
+        else:
+            items = quiver.fetch(Context(store, _progress), cache=store.pages("quiver"))
         n = engine.write_quiver_csv(a.output, items)
         print(f"Wrote {n} Quiver apps to {a.output}")
         return 0
 
-    if a.command == "refresh" or getattr(a, "refresh", False) or not store.snapshot:
-        snap = engine.refresh(store, _progress)
-        for e in snap["errors"]:
+    if a.command == "refresh" or getattr(a, "refresh", False) or not store.meta("refresh"):
+        result = engine.refresh(store, _progress, full=getattr(a, "full", False))
+        for e in result["errors"]:
             print(f"error: {e}", file=sys.stderr)
         if a.command == "refresh":
-            return 1 if snap["errors"] else 0
+            return 1 if result["errors"] else 0
 
-    result = engine.compare(store)
-    rows = result.candidates if a.all else result.missing
+    c = engine.compare(store)
+    which = "all" if a.all else a.list
+    rows = {
+        "missing": c.missing,
+        "other": c.other_sites,
+        "waiting": c.decided(engine.WAITING),
+        "blacklist": c.decided(engine.BLACKLIST),
+        "all": [x for x in c.candidates if x.listed],
+    }[which]
     if a.new_only:
-        rows = [c for c in rows if result.is_new(c)]
+        rows = [x for x in rows if c.is_new(x)]
     n = engine.write_candidates_csv(a.output, rows)
-    print(f"Wrote {n} projects to {a.output} ({len(result.missing)} missing from Quiver, {len(result.quiver)} in Quiver)")
+    print(f"Wrote {n} projects to {a.output} ({len(c.missing)} missing from Quiver, {len(c.other_sites)} on other "
+          f"sites, {len(c.quiver)} in Quiver)")
     return 0
 
 
