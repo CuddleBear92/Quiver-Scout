@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .decisions import BLACKLIST, WAIT_REASONS, WAITING
-from . import names
+from . import forges, names
 from .sources import (EXTERNAL, Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
                       recomplauncher, trilarion, unbaked)
 from .sources.base import Progress, day, no_progress
@@ -78,6 +78,16 @@ def refresh(store: Store, progress: Progress = no_progress, full: bool = False) 
             progress(f"{name} failed: {e}", 1, 1)
             status[name] = {"error": str(e)}
 
+    # Sites Quiver might read from that it has no app from yet: ask whether they're Forgejo/Gitea servers.
+    try:
+        all_items = store.items()
+        known = supported_hosts([Item.from_dict(i) for i in all_items if i["source"] == "quiver"])
+        hosts = {i["key"].split("/")[0] for i in all_items
+                 if i["source"] != "quiver" and forges.looks_like_repo(i["key"])} - known
+        store.set_meta("forges", forges.check(hosts, store.meta("forges", {}), progress=progress))
+    except Exception as e:  # a check that fails only leaves those projects in Other sites
+        progress(f"Forgejo/Gitea check failed: {e}", 1, 1)
+
     # First seen: the very first refresh marks everything as already known, so only later finds count as new.
     seen = store.seen()
     first_run = not seen
@@ -109,6 +119,7 @@ class Candidate:
     released: str = ""  # newest release any site knows of
     version: str = ""
     pushed: str = ""  # newest push any site knows of
+    runs_on: str = ""  # systems it has builds for or runs on (PC, Linux, Mac, Android...), from any site
     first_seen: str = ""
     sources: list[str] = field(default_factory=list)
     pages: dict[str, str] = field(default_factory=dict)
@@ -117,6 +128,7 @@ class Candidate:
     same_game: list[Item] = field(default_factory=list)  # Quiver apps for the same game, from another repository
     decision: dict | None = None
     supported_host: bool = True
+    forge: str = ""  # "forgejo" or "gitea" when its site was found to be a self-hosted one
 
     @property
     def host(self) -> str:
@@ -125,6 +137,11 @@ class Candidate:
     @property
     def listed(self) -> bool:
         return bool(self.sources)
+
+    @property
+    def android(self) -> bool:
+        """Runs on Android, by any site's say, or says Android in its name or link."""
+        return "Android" in self.runs_on.split(", ") or "android" in f"{self.title} {self.url} {self.game}".lower()
 
 
 @dataclass
@@ -157,11 +174,14 @@ class Comparison:
         return c.first_seen not in ("", "initial") and c.first_seen == self.refreshed_at
 
 
-def supported_hosts(quiver_items: list[Item]) -> set[str]:
+def supported_hosts(quiver_items: list[Item], forge_sites: dict | None = None) -> set[str]:
+    """Sites Quiver reads releases from: GitHub, GitLab, Codeberg, Bitbucket, any self-hosted site Quiver already has
+    an app from, and any site found to be a Forgejo or Gitea server."""
     hosts = set(FORGE_HOSTS)
     for q in quiver_items:
         if q.extra.get("provider", "github") in FORGE_PROVIDERS and q.key:
             hosts.add(q.key.split("/")[0])
+    hosts |= {h for h, v in (forge_sites or {}).items() if v.get("kind")}
     return hosts
 
 
@@ -179,7 +199,8 @@ def compare(store: Store) -> Comparison:
     items = [i for i in items if clones or not i.extra.get("clone")]
     seen = store.seen()
     quiver_items = [i for i in items if i.source == "quiver"]
-    hosts = supported_hosts(quiver_items)
+    forge_sites = store.meta("forges", {})
+    hosts = supported_hosts(quiver_items, forge_sites)
 
     by_key: dict[str, list[Item]] = {}
     by_game: dict[str, list[Item]] = {}
@@ -209,6 +230,9 @@ def compare(store: Store) -> Comparison:
             c.released, c.version = i.released, i.version
         if i.pushed and i.pushed > c.pushed:
             c.pushed = i.pushed
+        runs = names.platform(", ".join(x for x in (i.extra.get("runs_on"), i.extra.get("builds")) if x))
+        if runs:
+            c.runs_on = names.platform(", ".join(x for x in (c.runs_on, runs) if x))
 
     # Decided-on projects no site lists any more still show in Waiting and Blacklist.
     for key, d in store.decisions.entries.items():
@@ -222,6 +246,7 @@ def compare(store: Store) -> Comparison:
             c.same_game = by_game.get(normalize_title(c.game), [])
         c.decision = store.decisions.get(c.key)
         c.supported_host = c.host in hosts
+        c.forge = (forge_sites.get(c.host) or {}).get("kind", "")
 
     return Comparison(
         quiver=quiver_items,

@@ -29,6 +29,7 @@ COL = {
     "released": ("Latest release", 125, "date"),
     "version": ("Version", 80, ""),
     "pushed": ("Last push", 105, "date"),
+    "runs_on": ("Runs on", 150, ""),
     "added": ("Listed since", 115, "date"),
     "first_seen": ("First seen", 115, "date"),
     "same_game": ("Game in Quiver", 120, ""),
@@ -44,10 +45,10 @@ COL = {
 
 TABS = {
     "missing": ("Missing", ["title", "game", "platform", "method", "sources", "released", "version", "pushed", "added",
-                            "first_seen", "same_game", "url"]),
-    "other": ("Other sites", ["title", "game", "host", "sources", "released", "added", "first_seen", "url"]),
+                            "first_seen", "runs_on", "same_game", "url"]),
+    "other": ("Other sites", ["title", "game", "host", "sources", "released", "added", "first_seen", "runs_on", "url"]),
     "waiting": ("Waiting", ["title", "game", "reason", "note", "released", "version", "sources", "since", "by", "state",
-                            "url"]),
+                            "runs_on", "url"]),
     "blacklist": ("Blacklist", ["title", "game", "note", "since", "by", "state", "url"]),
     "quiver": ("In Quiver", ["title", "game", "released", "version", "added", "also_on", "slug", "url"]),
 }
@@ -55,7 +56,7 @@ TABS = {
 NOISY = re.compile(r"(pages|records) \d+/\d+|\(\d+\)$")
 
 # Hidden until shown from a heading's right-click menu.
-DEFAULT_HIDDEN = {"missing": ["pushed", "first_seen"], "waiting": ["by"], "blacklist": ["by"]}
+DEFAULT_HIDDEN = {"missing": ["pushed", "first_seen"], "waiting": ["by", "runs_on"], "blacklist": ["by"]}
 
 
 def open_url(url: str) -> None:
@@ -73,17 +74,22 @@ def open_folder(path: str) -> None:
 
 
 class Table(ttk.Frame):
-    """A Treeview with scrollbars, sortable headings and columns that can be hidden."""
+    """A Treeview with scrollbars and headings that sort, drag to reorder, and can be hidden.
+
+    Column order, hidden columns, widths and sorting are kept per tab in settings.json.
+    """
 
     def __init__(self, master, app: "App", tab: str):
         super().__init__(master)
         self.app, self.tab = app, tab
         self.columns = TABS[tab][1]
         self.tree = ttk.Treeview(self, columns=self.columns, show="headings", selectmode="extended")
+        widths = self._saved("column_widths", {})
         for cid in self.columns:
             label, width, _ = COL[cid]
             self.tree.heading(cid, text=label, command=lambda c=cid: self.sort_by(c))
-            self.tree.column(cid, width=width, minwidth=50, stretch=cid in ("title", "game", "url", "note"))
+            self.tree.column(cid, width=widths.get(cid, width), minwidth=50,
+                             stretch=cid in ("title", "game", "url", "note"))
         ys = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         xs = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
@@ -92,15 +98,30 @@ class Table(ttk.Frame):
         xs.grid(row=1, column=0, sticky="ew")
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        saved = app.store.settings.get("sort", {}).get(tab)
+        saved = self._saved("sort", None)
         self.sort_col, self.sort_desc = (saved[0], saved[1]) if saved and saved[0] in self.columns else (None, False)
-        self.apply_hidden()
+        self.default_order: list[str] = []  # the rows as the list gives them, for going back to no sorting
+        self._drag: dict | None = None
+        self._dragged = False  # a drag just ended: the heading's click that Tk sends after it isn't a sort
+        self.apply_columns()
         self._headings()
         self.tree.bind("<<TreeviewSelect>>", lambda e: app.show_details())
         self.tree.bind("<Double-1>", self._double)
         self.tree.bind("<Return>", lambda e: app.open_repo())
         self.tree.bind("<Button-3>", self._menu)
         self.tree.bind("<Button-2>", self._menu)
+        self.tree.bind("<ButtonPress-1>", self._press, add="+")
+        self.tree.bind("<B1-Motion>", self._motion, add="+")
+        self.tree.bind("<ButtonRelease-1>", self._release, add="+")
+
+    # ---- settings ------------------------------------------------------------------------------------------------
+
+    def _saved(self, key: str, default):
+        return self.app.store.settings.get(key, {}).get(self.tab, default)
+
+    def _save(self, key: str, value) -> None:
+        self.app.store.settings.setdefault(key, {})[self.tab] = value
+        self.app.store.save_settings()
 
     def colors(self, c: dict) -> None:
         f = c["fonts"]
@@ -108,36 +129,143 @@ class Table(ttk.Frame):
         self.tree.tag_configure("dim", foreground=c["dim"])
         self.tree.tag_configure("flag", foreground=c["good"])
 
-    def hidden(self) -> list[str]:
-        return self.app.store.settings.get("hidden_columns", {}).get(self.tab, DEFAULT_HIDDEN.get(self.tab, []))
+    # ---- which columns, in what order ----------------------------------------------------------------------------
 
-    def apply_hidden(self) -> None:
+    def hidden(self) -> list[str]:
+        return self._saved("hidden_columns", DEFAULT_HIDDEN.get(self.tab, []))
+
+    def order(self) -> list[str]:
+        """Every column in the order the user put them; columns added since go where the tab first has them."""
+        saved = [c for c in self._saved("column_order", []) if c in self.columns]
+        for n, c in enumerate(self.columns):
+            if c not in saved:
+                saved.insert(min(n, len(saved)), c)
+        return saved
+
+    def apply_columns(self) -> None:
         hidden = set(self.hidden())
-        self.tree["displaycolumns"] = [c for c in self.columns if c not in hidden] or self.columns
+        self.tree["displaycolumns"] = [c for c in self.order() if c not in hidden] or self.columns
 
     def toggle_column(self, cid: str) -> None:
         hidden = list(self.hidden())
         hidden.remove(cid) if cid in hidden else hidden.append(cid)
-        self.app.store.settings.setdefault("hidden_columns", {})[self.tab] = hidden
+        self._save("hidden_columns", hidden)
+        self.apply_columns()
+
+    def move_column(self, cid: str, before: str | None) -> None:
+        """Put `cid` just before `before` (at the end when None)."""
+        order = [c for c in self.order() if c != cid]
+        order.insert(order.index(before) if before in order else len(order), cid)
+        self._save("column_order", order)
+        self.apply_columns()
+
+    def step_column(self, cid: str, step: int) -> None:
+        shown = list(self.tree["displaycolumns"])
+        i = shown.index(cid)
+        j = max(0, min(len(shown) - 1, i + step))
+        if i == j:
+            return
+        target = shown[j]
+        order = [c for c in self.order() if c != cid]
+        k = order.index(target) + (1 if step > 0 else 0)
+        order.insert(k, cid)
+        self._save("column_order", order)
+        self.apply_columns()
+
+    def reset_columns(self) -> None:
+        for key in ("column_order", "hidden_columns", "column_widths"):
+            self.app.store.settings.get(key, {}).pop(self.tab, None)
         self.app.store.save_settings()
-        self.apply_hidden()
+        for cid in self.columns:
+            self.tree.column(cid, width=COL[cid][1])
+        self.apply_columns()
+
+    def _column_at(self, x: int) -> str | None:
+        col = self.tree.identify_column(x)  # "#3": the third column shown
+        shown = list(self.tree["displaycolumns"])
+        try:
+            return shown[int(col.lstrip("#")) - 1]
+        except (ValueError, IndexError):
+            return None
+
+    # ---- dragging headings, and remembering widths ---------------------------------------------------------------
+
+    def _press(self, event) -> None:
+        region = self.tree.identify_region(event.x, event.y)
+        self._drag, self._dragged = None, False
+        if region == "heading":
+            self._drag = {"col": self._column_at(event.x), "x": event.x, "moving": False}
+        elif region == "separator":
+            self._drag = {"resize": True}
+
+    def _motion(self, event) -> None:
+        d = self._drag
+        if d and d.get("col") and not d["moving"] and abs(event.x - d["x"]) > 12:
+            d["moving"] = True
+            self.tree.configure(cursor="fleur")
+
+    def _release(self, event) -> None:
+        d, self._drag = self._drag, None
+        if not d:
+            return
+        if d.get("resize"):
+            self._save("column_widths", {c: self.tree.column(c, "width") for c in self.columns})
+            return
+        if not d.get("moving"):
+            return
+        self._dragged = True
+        # Tk sends the heading's click right after this, if it does at all; past that, clicks are clicks again.
+        self.after_idle(lambda: setattr(self, "_dragged", False))
+        self.tree.configure(cursor="")
+        target = self._column_at(event.x)
+        col = d["col"]
+        if not target or target == col:
+            return
+        shown = list(self.tree["displaycolumns"])
+        # Dropped on a column's right half: after it; on its left half: before it.
+        bbox_x = sum(self.tree.column(c, "width") for c in shown[:shown.index(target)]) - self.tree.xview()[0] * \
+            sum(self.tree.column(c, "width") for c in shown)
+        after = event.x > bbox_x + self.tree.column(target, "width") / 2
+        i = shown.index(target) + (1 if after else 0)
+        before = shown[i] if i < len(shown) else None
+        if before == col:
+            return
+        self.move_column(col, before)
 
     def _double(self, event) -> None:
         if self.tree.identify_region(event.x, event.y) == "cell":
             self.app.open_repo()
 
     def _menu(self, event) -> None:
-        if self.tree.identify_region(event.x, event.y) == "heading":
+        if self.tree.identify_region(event.x, event.y) in ("heading", "separator"):
+            cid = self._column_at(event.x)
             m = tk.Menu(self, tearoff=False)
+            if cid:
+                name = COL[cid][0]
+                m.add_command(label=f"Sort by {name}", command=lambda: self.sort_by(cid, cycle=False))
+                m.add_command(label="No sorting (the list's own order)", command=self.unsort,
+                              state="normal" if self.sort_col else "disabled")
+                m.add_separator()
+                m.add_command(label=f"Move {name} left", command=lambda: self.step_column(cid, -1))
+                m.add_command(label=f"Move {name} right", command=lambda: self.step_column(cid, 1))
+                m.add_command(label=f"Hide {name}", command=lambda: self.toggle_column(cid))
+                m.add_separator()
+            shown = tk.Menu(m, tearoff=False)
             hidden = set(self.hidden())
             self._menu_vars = []  # Tk forgets a checkbutton's state if its variable is garbage collected
-            for cid in self.columns:
-                var = tk.BooleanVar(value=cid not in hidden)
+            for c in self.order():
+                var = tk.BooleanVar(value=c not in hidden)
                 self._menu_vars.append(var)
-                m.add_checkbutton(label=COL[cid][0], variable=var, command=lambda c=cid: self.toggle_column(c))
+                shown.add_checkbutton(label=COL[c][0], variable=var, command=lambda c=c: self.toggle_column(c))
+            theme.style_menu(shown, self.app.c)
+            m.add_cascade(label="Columns", menu=shown)
+            m.add_command(label="Reset columns (order, shown, widths)", command=self.reset_columns)
+            theme.style_menu(m, self.app.c)
             m.tk_popup(event.x_root, event.y_root)
             return
         self.app.context_menu(event)
+
+    # ---- rows and sorting ----------------------------------------------------------------------------------------
 
     def fill(self, rows: list[tuple[str, dict, tuple]]) -> None:
         """rows: (iid, values by column id, tags)."""
@@ -145,6 +273,7 @@ class Table(ttk.Frame):
         self.tree.delete(*self.tree.get_children())
         for iid, values, tags in rows:
             self.tree.insert("", "end", iid=iid, values=[values.get(c, "") for c in self.columns], tags=tags)
+        self.default_order = [r[0] for r in rows]
         if self.sort_col:
             self._sort()
         keep = [i for i in selected if self.tree.exists(i)]
@@ -155,15 +284,28 @@ class Table(ttk.Frame):
     def selection(self) -> list[str]:
         return list(self.tree.selection())
 
-    def sort_by(self, col: str) -> None:
-        if self.sort_col == col:
-            self.sort_desc = not self.sort_desc
+    def sort_by(self, col: str, cycle: bool = True) -> None:
+        """A click on a heading sorts by it, a second click reverses, a third goes back to the list's own order."""
+        if self._dragged:
+            self._dragged = False
+            return
+        first_desc = COL[col][2] == "date"  # dates start newest first: that's what's asked of them
+        if self.sort_col != col or not cycle:
+            self.sort_col, self.sort_desc = col, first_desc
+        elif self.sort_desc == first_desc:
+            self.sort_desc = not first_desc
         else:
-            # Dates sort newest first to begin with: that's what's asked of them.
-            self.sort_col, self.sort_desc = col, COL[col][2] == "date"
-        self.app.store.settings.setdefault("sort", {})[self.tab] = [self.sort_col, self.sort_desc]
-        self.app.store.save_settings()
+            self.unsort()
+            return
+        self._save("sort", [self.sort_col, self.sort_desc])
         self._sort()
+
+    def unsort(self) -> None:
+        self.sort_col, self.sort_desc = None, False
+        self._save("sort", None)
+        for n, iid in enumerate(i for i in self.default_order if self.tree.exists(i)):
+            self.tree.move(iid, "", n)
+        self._headings()
 
     def _sort(self) -> None:
         col = self.sort_col
@@ -332,6 +474,7 @@ class App:
         self.has_release = self._check(filters, "Has a release")
         self.hide_same_game = self._check(filters, "Hide games in Quiver")
         self.multi_only = self._check(filters, "2+ sites")
+        self.android_only = self._check(filters, "Android")
 
         # The bottom is packed before the lists so it keeps its size and the lists take what's left.
         bottom = ttk.Frame(self.root, padding=(10, 0, 10, 8))
@@ -419,7 +562,9 @@ class App:
             "Ctrl+F / Esc\tSearch / clear the search",
             "Ctrl+E\tExport the current list as CSV",
             "Right-click a row\tMore actions",
-            "Right-click a heading\tShow or hide columns",
+            "Click a heading\tSort; again to reverse; a third time for the default order",
+            "Drag a heading\tMove the column",
+            "Right-click a heading\tMove, hide, show or reset columns",
         ]))
 
     # ---- theme ---------------------------------------------------------------------------------------------------
@@ -494,6 +639,8 @@ class App:
                     continue
                 if self.multi_only.get() and len(c.sources) < 2:
                     continue
+                if self.android_only.get() and not c.android:
+                    continue
             d = c.decision or {}
             if text and not self._matches(text, c.title, c.game, c.url, c.author, c.platform, c.method,
                                           d.get("note", ""), d.get("by", "")):
@@ -512,7 +659,7 @@ class App:
         return {
             "title": c.title, "game": c.game, "platform": c.platform, "method": c.method,
             "sources": ", ".join(EXTERNAL[s] for s in c.sources), "host": c.host, "released": c.released,
-            "version": c.version, "pushed": c.pushed, "added": c.added,
+            "version": c.version, "pushed": c.pushed, "added": c.added, "runs_on": c.runs_on,
             "first_seen": "" if c.first_seen == "initial" else c.first_seen,
             "same_game": f"yes ({len(c.same_game)})" if c.same_game else "",
             "reason": WAIT_REASONS.get(d.get("reason", ""), d.get("reason", "")), "note": d.get("note", ""),
@@ -834,6 +981,8 @@ class App:
         self._link(c.url, c.url)
         if not c.supported_host:
             d.insert("end", f"   {c.host} isn't a code host Quiver reads", "warn")
+        elif c.forge:
+            d.insert("end", f"   {c.host} is a {'Forgejo' if c.forge == 'forgejo' else 'Gitea'} server", "flag")
         facts = [f for f in (c.method, f"by {c.author}" if c.author else "") if f]
         if facts:
             d.insert("end", "   " + " · ".join(facts), "label")

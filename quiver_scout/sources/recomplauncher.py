@@ -30,9 +30,9 @@ def parse(catalog: dict) -> list[Item]:
                 version=a.get("tag") or a.get("version") or "",
                 slug=a.get("id", ""),
                 extra={
-                    k: a[k]
-                    for k in ("status", "archived", "soon", "stars", "downloads", "releases", "first")
-                    if a.get(k) not in (None, "", False)
+                    **{k: a[k] for k in ("status", "archived", "soon", "stars", "downloads", "releases", "first")
+                       if a.get(k) not in (None, "", False)},
+                    **({"runs_on": ", ".join(a["systems"])} if a.get("systems") else {}),
                 },
             )
         )
