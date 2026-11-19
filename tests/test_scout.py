@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from quiver_scout import engine, names, net
+from quiver_scout import engine, forges, names, net
 from quiver_scout.decisions import BLACKLIST, WAITING, Decisions
 from quiver_scout.sources import (Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
                                   recomplauncher, trilarion, unbaked)
@@ -214,6 +214,52 @@ class CloneSites(unittest.TestCase):
         self.assertEqual((dfu.platform, dfu.extra["runs_on"]), ("", "Windows, Linux, macOS"))
 
 
+class Forges(unittest.TestCase):
+    def answer(self, table):
+        def fake(url, **kw):
+            v = table.get(url)
+            if isinstance(v, Exception):
+                raise v
+            if v is None:
+                raise net.HTTPStatusError(f"{url}: HTTP 404", 404)
+            return net.Response(200, json.dumps(v).encode() if not isinstance(v, bytes) else v)
+        return fake
+
+    def test_probe_tells_forgejo_gitea_and_neither(self):
+        table = {
+            "https://gitea.example/api/v1/version": {"version": "1.22.3"},
+            "https://forgejo.example/api/v1/version": {"version": "9.0.1+gitea-1.22.0"},
+            "https://shop.example/api/v1/version": b"<html>not here</html>",
+            "https://down.example/api/v1/version": net.FetchError("connection refused"),
+        }
+        with mock.patch.object(net, "request", side_effect=self.answer(table)):
+            self.assertEqual(forges.probe("gitea.example"), "gitea")
+            self.assertEqual(forges.probe("forgejo.example"), "forgejo")
+            self.assertEqual(forges.probe("shop.example"), "")
+            self.assertEqual(forges.probe("nothing.example"), "")  # 404
+            self.assertIsNone(forges.probe("down.example"))  # no answer: ask again next time
+
+    def test_check_asks_once_and_rechecks_old_negatives(self):
+        from datetime import date
+        known = {"old.example": {"kind": "", "checked": "2026-01-01"}, "fresh.example": {"kind": "", "checked": "2026-11-18"},
+                 "git.example": {"kind": "gitea", "checked": "2025-01-01"}}
+        known["quiet.example"] = {"kind": "", "checked": "2026-11-17", "no_answer": True}
+        known["quieter.example"] = {"kind": "", "checked": "2026-11-19", "no_answer": True}
+        answers = {"old.example": "forgejo", "new.example": None}
+        with mock.patch.object(forges, "probe", side_effect=lambda h: answers.get(h, "")) as p:
+            forges.check({"old.example", "fresh.example", "git.example", "new.example", "quiet.example", "quieter.example"},
+                         known, today=date(2026, 11, 19))
+        self.assertEqual(sorted(c.args[0] for c in p.call_args_list), ["new.example", "old.example", "quiet.example"])
+        self.assertEqual(known["old.example"]["kind"], "forgejo")
+        self.assertTrue(known["new.example"]["no_answer"])  # asked again tomorrow
+
+    def test_only_repository_addresses_are_asked(self):
+        self.assertTrue(forges.looks_like_repo("git.example.dev/owner/repo"))
+        self.assertFalse(forges.looks_like_repo("smash.fun"))
+        self.assertFalse(forges.looks_like_repo("user.github.io/game"))
+        self.assertFalse(forges.looks_like_repo("someone.itch.io/game"))
+
+
 class ConditionalDownloads(unittest.TestCase):
     def test_304_reuses_the_saved_body(self):
         with tempfile.TemporaryDirectory() as d:
@@ -350,6 +396,24 @@ class Compare(unittest.TestCase):
         self.assertEqual([c.title for c in engine.compare(self.store).missing], ["R"])
         self.store.settings["include_clones"] = True
         self.assertEqual(sorted(c.title for c in engine.compare(self.store).missing), ["C", "R"])
+
+
+    def test_forge_sites_count_as_supported(self):
+        self.put([Item("playported", "https://git.example.dev/a/b", "Forge project"),
+                  Item("playported", "https://shop.example/game", "Web page")])
+        self.store.set_meta("forges", {"git.example.dev": {"kind": "forgejo", "checked": "2026-11-19"}})
+        r = engine.compare(self.store)
+        self.assertEqual([(c.title, c.forge) for c in r.missing], [("Forge project", "forgejo")])
+        self.assertEqual([c.title for c in r.other_sites], ["Web page"])
+
+    def test_runs_on_and_android(self):
+        self.put([Item("decompbuddy", "https://github.com/a/b", "B", extra={"builds": "Windows, Android"}),
+                  Item("trilarion", "https://github.com/a/b", "B", extra={"runs_on": "Linux, macOS"}),
+                  Item("playported", "https://github.com/c/sm64-android", "SM64 port"),
+                  Item("playported", "https://github.com/d/pc-only", "PC only")])
+        by = {c.title: c for c in engine.compare(self.store).missing}
+        self.assertEqual(by["B"].runs_on, "PC, Android, Linux, Mac")
+        self.assertEqual({t for t, c in by.items() if c.android}, {"B", "SM64 port"})
 
 
     def test_csv_exports(self):

@@ -36,7 +36,8 @@ def _item(game: dict, project: dict, added: str = "") -> Item:
         added=day(project.get("added") or added),
         pushed=day(project.get("last_push")),
         slug=game.get("slug") or game.get("game", ""),
-        extra={k: project[k] for k in ("stars", "archived", "license") if project.get(k) not in (None, "", False)},
+        extra={**{k: project[k] for k in ("stars", "archived", "license") if project.get(k) not in (None, "", False)},
+               **({"runs_on": ", ".join(project["runs_on"])} if project.get("runs_on") else {})},
     )
 
 

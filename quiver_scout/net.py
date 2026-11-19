@@ -19,6 +19,14 @@ class FetchError(RuntimeError):
     pass
 
 
+class HTTPStatusError(FetchError):
+    """The server answered, with an error status (404, 403...)."""
+
+    def __init__(self, message: str, status: int):
+        super().__init__(message)
+        self.status = status
+
+
 @dataclass
 class Response:
     status: int  # 200, or 304 when the server says the copy we have is still current
@@ -42,10 +50,11 @@ def request(url: str, headers: dict | None = None, timeout: float = 30, retries:
                 return Response(304, b"", {k.lower(): v for k, v in e.headers.items()})
             last = e
             if e.code != 429 and e.code < 500:
-                raise FetchError(f"{url}: HTTP {e.code}") from e
+                raise HTTPStatusError(f"{url}: HTTP {e.code}", e.code) from e
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
             last = e
-        time.sleep(1.5 * (attempt + 1))
+        if attempt + 1 < retries:
+            time.sleep(1.5 * (attempt + 1))
     raise FetchError(f"{url}: {last}")
 
 

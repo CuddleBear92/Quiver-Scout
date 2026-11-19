@@ -28,6 +28,11 @@ OSGameClones, Cloned Games and OSGL list many; they're left out unless **Setting
 Games calls everything that isn't a decompilation or recompilation a clone, source ports too, so those of its
 projects count as clones here; most are also on OSGameClones or OSGL as remakes.
 
+**Forgejo and Gitea** run on anyone's server, so a project on a site the tool doesn't know is checked the way Quiver
+Launcher checks one: the site is asked for `/api/v1/version`, which Forgejo and Gitea answer. Only addresses shaped
+like a repository (`site/owner/name`) are checked, each site once; sites that aren't forges are asked again after 30
+days, and sites that didn't answer after a day. A project on a Forgejo/Gitea site goes to Missing, not Other sites.
+
 Platforms and methods are written one way whichever site they come from: `ps2`, `PS2` and `PlayStation 2` are all
 *PlayStation 2*, `gba` is *Game Boy Advance*, `x360` is *Xbox 360* (see `quiver_scout/names.py`).
 
@@ -63,20 +68,28 @@ pip install .
 
 | Tab | What's in it |
 | --- | --- |
-| **Missing** | Projects other sites list that Quiver doesn't, on a code host Quiver reads releases from (GitHub, GitLab, Codeberg, Bitbucket, and any self-hosted Gitea/Forgejo site Quiver already has an app from). Bold rows are new in the last refresh. |
+| **Missing** | Projects other sites list that Quiver doesn't, on a code host Quiver reads releases from: GitHub, GitLab, Codeberg, Bitbucket, and self-hosted Forgejo/Gitea servers (see below). Bold rows are new in the last refresh. |
 | **Other sites** | The same, but on a site Quiver can't read yet: SourceForge, itch.io, a project's own website, a web port. Kept apart for when Quiver supports custom sites. |
 | **Waiting** | Projects you're waiting on, and why: Quiver must support its site first, no source code yet, no release file yet, or something else, with a note. A green row is in Quiver now, so you can take it off the list. |
 | **Blacklist** | Projects you decided not to add, with a note. Grey rows are no longer listed anywhere. |
 | **In Quiver** | Quiver's catalog, each app's latest release, and which other sites also list it. |
 | **Log** | What each refresh did, and any site that failed. |
 
-Columns include **Latest release**, **Version**, **Last push**, **Listed since** and **First seen**. Click a heading
-to sort (dates sort newest first, with unknown dates last either way); right-click a heading to show or hide
-columns. Sorting and columns are remembered. *Game in Quiver* says Quiver already has another app for the same game,
+Columns include **Latest release**, **Version**, **Last push**, **Listed since**, **First seen** and **Runs on**.
+
+- **Sort:** click a heading. A second click reverses, a third goes back to the list's own order (by game). Dates sort
+  newest first, with unknown dates last either way.
+- **Reorder:** drag a heading left or right, or right-click it for *Move left* / *Move right*.
+- **Hide:** right-click a heading for *Hide*, or tick columns under *Columns*. *Reset columns* puts back the order,
+  columns and widths.
+
+Each tab's column order, hidden columns, widths and sorting are saved in `settings.json`. *Game in Quiver* says Quiver already has another app for the same game,
 often a sign it's a fork; the details pane links to it.
 
 Filters: search (every word must match the project, game, URL, author, platform, method or note), *Listed on*
-(a drop-down of the sites), *New* (in the last refresh), *Has a release*, *Hide games in Quiver*, and *2+ sites*.
+(a drop-down of the sites), *New* (in the last refresh), *Has a release*, *Hide games in Quiver*, *2+ sites*, and
+*Android*: projects that run on Android, by any site's say (Decomp Buddy's builds, unbaked's and OSGL's platforms,
+RecompLauncher's systems), or that say Android in their name or link.
 
 The details pane, under the list when one project is selected and only as tall as what it says, shows what each
 site says about it: its page there, the release it knows of,
