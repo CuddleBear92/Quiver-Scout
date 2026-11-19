@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -111,8 +112,85 @@ def refresh(store: Store, progress: Progress = no_progress, full: bool = False) 
             result["links"] = check_links(store, progress)
         except Exception as e:
             progress(f"Link check failed: {e}", 1, 1)
+    else:
+        try:
+            result["live"] = verify_quiver_live(store, progress)
+        except Exception as e:
+            progress(f"Live check of Down in Quiver failed: {e}", 1, 1)
     progress("Done" + (f", with {len(errors)} error(s)" if errors else ""), 1, 1)
     return result
+
+
+def apply_live(live: dict, quiver_items: list[Item]) -> list[Item]:
+    """Quiver's apps as the live catalog has them now: archived ones left out, changed repositories changed.
+    `live` is what verify_quiver_live found: slug -> {"archived": True} or {"url", "provider"}."""
+    out = []
+    for q in quiver_items:
+        v = live.get(q.slug) or {}
+        if v.get("archived"):
+            continue
+        if v.get("url"):
+            c = canonical(v["url"])
+            if c and c[0] != q.key:
+                q.key, q.url = c
+                q.extra = {**q.extra, "provider": v.get("provider") or q.extra.get("provider", ""), "live": True}
+        out.append(q)
+    return out
+
+
+def verify_quiver_live(store: Store, progress: Progress = no_progress, slugs: list[str] | None = None) -> dict:
+    """Ask Quiver's live (uncached) API about each app in Down in Quiver (or `slugs`): an archived app answers
+    404 and is left out from then on; an app whose repository was changed gets the new one. The catalog the tool
+    reads otherwise is Cloudflare's cached copy, which can be 20 minutes behind. Returns counts."""
+    from datetime import date
+    from urllib.parse import quote
+
+    from . import linkcheck, net
+    from .sources import quiver as quiver_source
+    from .urls import from_provider
+
+    items = [Item.from_dict(d) for d in store.items("quiver")]
+    by_slug = {q.slug: q for q in items}
+    # Forget apps that have left the catalog (archived ones do, once the cache catches up).
+    live = {s: v for s, v in store.meta("quiver_live", {}).items() if s in by_slug}
+    if slugs is None:
+        states = link_states(store)
+        shown = apply_live(live, [Item.from_dict(d) for d in store.items("quiver")])
+        slugs = [q.slug for q in shown if (states.get(q.key) or {}).get("status") in linkcheck.TAKEN_DOWN]
+        # Archived ones are asked again too, in case they were brought back.
+        slugs += [s for s, v in live.items() if v.get("archived") and s not in slugs]
+    counts = {"checked": 0, "archived": 0, "changed": 0}
+    if not slugs:
+        store.set_meta("quiver_live", live)
+        return counts
+    progress(f"Asking Quiver about {len(slugs)} app(s) in Down in Quiver", 0, len(slugs))
+    today = date.today().isoformat()
+    for n, slug in enumerate(slugs, start=1):
+        try:
+            r = net.request(f"{quiver_source.LIVE_API}/apps/{quote(slug, safe='')}", retries=2)
+            project = (json.loads(r.body) or {}).get("project") or {}
+        except net.HTTPStatusError as e:
+            if e.status == 404:
+                live[slug] = {"archived": True, "checked": today}
+                counts["archived"] += 1
+                counts["checked"] += 1
+            continue
+        except Exception:
+            continue
+        counts["checked"] += 1
+        url = from_provider(project.get("provider", ""), project.get("repository", ""), project.get("host"))
+        c = canonical(url) if url else None
+        q = by_slug.get(slug)
+        if c and q and c[0] != q.key:
+            live[slug] = {"url": c[1], "provider": project.get("provider", ""), "checked": today}
+            counts["changed"] += 1
+        else:
+            live.pop(slug, None)  # as the catalog says: nothing to change
+        progress(f"Quiver: {n}/{len(slugs)}", n, len(slugs))
+    store.set_meta("quiver_live", live)
+    progress(f"Quiver: {counts['archived']} archived, {counts['changed']} with a changed repository, of "
+             f"{counts['checked']} asked", 1, 1)
+    return counts
 
 
 def link_states(store: Store) -> dict[str, dict]:
@@ -183,9 +261,14 @@ def check_links(store: Store, progress: Progress = no_progress, keys: list[str] 
              + (f"; {shared} change(s) to the shared list" if shared else ""), 1, 1)
 
     # Look for taken-down Quiver apps elsewhere every day, as developers may move their code; for other taken-down
-    # projects, only among what's already listed (no requests).
+    # projects, only among what's already listed (no requests). Apps archived or changed in Quiver since the cached
+    # catalog was read are taken out first, so they aren't looked for.
+    try:
+        counts["live"] = verify_quiver_live(store, progress)
+    except Exception as e:
+        progress(f"Live check of Down in Quiver failed: {e}", 1, 1)
     states = link_states(store)
-    quiver_keys = {i.key for i in items if i.source == "quiver"}
+    quiver_keys = {q.key for q in apply_live(store.meta("quiver_live", {}), [i for i in items if i.source == "quiver"])}
     down = [k for k, e in states.items() if e.get("status") in linkcheck.TAKEN_DOWN]
     ask = [k for k in down if k in quiver_keys and (states[k].get("replacements_checked", "") < today.isoformat())]
     data_only = [k for k in entries if k in down and k not in quiver_keys]
@@ -356,7 +439,7 @@ def compare(store: Store) -> Comparison:
     items = [_tidy(Item.from_dict(d)) for d in store.items()]
     items = [i for i in items if clones or not i.extra.get("clone")]
     seen = store.seen()
-    quiver_items = [i for i in items if i.source == "quiver"]
+    quiver_items = apply_live(store.meta("quiver_live", {}), [i for i in items if i.source == "quiver"])
     forge_sites = store.meta("forges", {})
     hosts = supported_hosts(quiver_items, forge_sites)
 

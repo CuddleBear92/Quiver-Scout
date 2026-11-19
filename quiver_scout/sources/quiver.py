@@ -15,7 +15,10 @@ from ..urls import from_provider
 from .base import Context, Item, day
 
 API = "https://api.quiverlauncher.com/api/v1"
+# The same API on the Convex deployment's own host, which the launcher falls back to. api.quiverlauncher.com is
+# Cloudflare's cache in front of it, up to 20 minutes behind; this one answers with what's live right now.
 FALLBACK_API = "https://famous-wildebeest-660.convex.site/api/v1"
+LIVE_API = FALLBACK_API
 SITE = "https://quiverlauncher.com"
 
 # More unknown apps than this and reading the whole list by name is quicker than paging newest-first.

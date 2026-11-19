@@ -478,6 +478,7 @@ class App:
         f.add_separator()
         f.add_command(label="Check links (new and due)", accelerator="Ctrl+L", command=self.check_links)
         f.add_command(label="Check every link again", command=lambda: self.check_links(everything=True))
+        f.add_command(label="Check Down in Quiver against live Quiver", command=self.check_quiver_live)
         f.add_separator()
         f.add_command(label="Export this list as CSV…", accelerator="Ctrl+E", command=self.export_view)
         f.add_command(label="Export every project as CSV…", command=self.export_all)
@@ -1105,6 +1106,11 @@ class App:
         m.add_command(label="Check link now", command=self.check_selected_links,
                       state="disabled" if self.refreshing else "normal")
         down_keys = self._selected_down_keys()
+        if cur in QUIVER_TABS:
+            slugs = [self.quiver_rows[i].slug for i in self.tables[cur].selection() if i in self.quiver_rows]
+            m.add_command(label="Check live in Quiver (archived? repository changed?)",
+                          command=lambda: self.check_quiver_live(slugs),
+                          state="normal" if slugs and not self.refreshing else "disabled")
         m.add_command(label="Find replacements now", command=self.find_selected_replacements,
                       state="normal" if down_keys and not self.refreshing else "disabled")
         link = self.result.links.get(down_keys[0]) if len(down_keys) == 1 else None
@@ -1132,6 +1138,18 @@ class App:
                 for q in cands[0].same_game[:8]:
                     m.add_command(label=f"Quiver has the same game: {q.title}", command=lambda u=q.page or q.url: open_url(u))
         m.tk_popup(event.x_root, event.y_root)
+
+    def check_quiver_live(self, slugs: list[str] | None = None) -> None:
+        """Ask Quiver's live catalog about the apps in Down in Quiver (or the selected ones): archived ones and ones
+        whose repository was changed leave the tab."""
+        if self.refreshing:
+            return
+        self.log("--- Asking live Quiver about Down in Quiver")
+
+        def work(say):
+            counts = engine.verify_quiver_live(self.store, say, slugs=slugs)
+            return {"checked": 0, "live": counts}
+        self._start("links", "Asking Quiver…", work)
 
     def _selected_down_keys(self) -> list[str]:
         keys = [self._key_of(u) for u, _ in self.selected_links()]
@@ -1223,6 +1241,8 @@ class App:
         d.insert("end", f"   {q.game}")
         self._line("Repository")
         self._link(q.url, q.url)
+        if q.extra.get("live"):
+            d.insert("end", "   changed in Quiver (live), not yet in the cached catalog", "flag")
         self._line("Quiver page")
         self._link(q.page, q.page)
         facts = [f for f in (f"latest release {q.version} on {q.released}" if q.released else "",
@@ -1383,8 +1403,11 @@ class App:
                     if self.job == "links":
                         down, qdown = len(self.result.taken_down), len(self.result.quiver_down)
                         found = a.get("replacements", 0)
+                        live = a.get("live") or {}
                         text = (f"Links checked: {a.get('checked', 0)}. Taken down: {qdown} Quiver app(s), {down} listed "
-                                f"project(s)." + (f" Possible replacements for {found}." if found else ""))
+                                f"project(s)." + (f" Possible replacements for {found}." if found else "")
+                                + (f" Quiver: {live.get('archived', 0)} archived, {live.get('changed', 0)} repository "
+                                   f"changed." if live.get("checked") else ""))
                         self.status.config(text=text, style="Error.TLabel" if qdown else "TLabel")
                         self.log(text)
                         return
