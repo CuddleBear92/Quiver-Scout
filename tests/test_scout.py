@@ -657,16 +657,20 @@ class Compare(unittest.TestCase):
         self.assertEqual(self.store.meta("quiver_live"), {})
 
 
-    def test_app_in_quiver_is_by_app_not_game(self):
+    def test_app_in_quiver_is_by_app_and_creator_not_game(self):
         self.put([Item("quiver", "https://github.com/dev/Zelda64Recomp", "Zelda 64: Recompiled", game="Majora's Mask", slug="z"),
                   Item("quiver", "https://github.com/a/recomp", "Recomp", game="Doom", slug="generic"),
                   Item("playported", "https://github.com/fork/zelda64recomp", "zelda64recomp", game="Majora's Mask"),
-                  Item("unbaked", "https://codeberg.org/x/mm-port", "Zelda 64 - Recompiled", game="Majora's Mask"),
+                  Item("playported", "https://codeberg.org/dev/zelda64recomp", "zelda64recomp", game="Majora's Mask"),
+                  Item("unbaked", "https://codeberg.org/x/mm-port", "Zelda 64 - Recompiled", game="Majora's Mask", author="dev"),
+                  Item("unbaked", "https://gitlab.com/y/mm", "Zelda 64 - Recompiled", game="Majora's Mask"),
                   Item("unbaked", "https://github.com/y/other-mm", "Other MM port", game="Majora's Mask"),
-                  Item("unbaked", "https://github.com/z/recomp", "Recomp", game="Doom")])
+                  Item("unbaked", "https://github.com/z/recomp", "Recomp", game="Doom", author="a")])
         by = {c.key: c for c in engine.compare(self.store).missing}
-        self.assertEqual([q.slug for q in by["github.com/fork/zelda64recomp"].same_app], ["z"])  # same repository name
-        self.assertEqual([q.slug for q in by["codeberg.org/x/mm-port"].same_app], ["z"])  # same project name
+        self.assertEqual(by["github.com/fork/zelda64recomp"].same_app, [])  # a fork: same name, another owner
+        self.assertEqual([q.slug for q in by["codeberg.org/dev/zelda64recomp"].same_app], ["z"])  # moved host
+        self.assertEqual([q.slug for q in by["codeberg.org/x/mm-port"].same_app], ["z"])  # same title, developer named
+        self.assertEqual(by["gitlab.com/y/mm"].same_app, [])  # same title, someone else's
         self.assertEqual(by["github.com/y/other-mm"].same_app, [])  # only the same game
         self.assertEqual([q.slug for q in by["github.com/y/other-mm"].same_game], ["z"])
         self.assertEqual(by["github.com/z/recomp"].same_app, [])  # names too common to tell apps apart

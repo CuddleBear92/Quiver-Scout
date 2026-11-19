@@ -121,14 +121,13 @@ def on_screen(root: tk.Misc, geometry: str) -> bool:
 
 
 def same_app_text(c: Candidate) -> str:
-    """App in Quiver: "same owner" when a Quiver app of that name is the same account's (likely the same app moved
-    or renamed), else "same name" (a fork, or another project called the same), with how many."""
+    """App in Quiver: the Quiver app with the same name and creator at another link ("likely: owner/repo"), and how
+    many more."""
     if not c.same_app:
         return ""
-    owner = c.key.split("/")[1].lower() if c.key.count("/") >= 2 else ""
-    same_owner = any(q.key.count("/") >= 2 and q.key.split("/")[1].lower() == owner for q in c.same_app)
-    text = "same owner" if same_owner else "same name"
-    return text + (f" ({len(c.same_app)})" if len(c.same_app) > 1 else "")
+    q = c.same_app[0]
+    return "likely: " + q.url.split("://", 1)[-1].split("/", 1)[-1] + (
+        f" (+{len(c.same_app) - 1})" if len(c.same_app) > 1 else "")
 
 
 def link_values(link: dict | None) -> dict:
@@ -1358,10 +1357,10 @@ class App:
             d.insert("end", "(you can take it off this list)", "flag")
         else:
             if c.same_app:
-                self._line("Quiver may have this app as")
+                self._line("Quiver likely has this app as")
                 for q in c.same_app[:6]:
                     self._link(q.title, q.page or q.url)
-                    d.insert("end", f" ({q.url.split('://', 1)[-1]})   ", "label")
+                    d.insert("end", f" ({q.url.split('://', 1)[-1]}, same name and creator)   ", "label")
             others = [q for q in c.same_game if q not in c.same_app]
             if others:
                 self._line("Other Quiver apps for this game")

@@ -31,6 +31,13 @@ GENERIC_NAMES = {"recomp", "decomp", "port", "pcport", "game", "games", "src", "
                  "nativeport", "staticrecomp", "project", "release", "releases", "build", "engine", "client"}
 
 
+def creators(key: str, *authors: str) -> set[str]:
+    """Who made a project: its repository's owner, and the developer names sites give, lowercase letters and digits
+    only. Two projects with the same name are the same app only when they share one of these."""
+    owner = key.split("/")[1] if key.count("/") >= 2 else ""
+    return {n for n in (normalize_title(x) for x in (owner, *authors)) if n}
+
+
 def app_names(title: str, key: str) -> set[str]:
     """The names an app goes by, to tell the same app under another link: its project name and its repository's
     name, lowercase letters and digits only ("Zelda 64: Recompiled" and Zelda64Recomp). Names too short or too
@@ -352,7 +359,7 @@ class Candidate:
     pages: dict[str, str] = field(default_factory=dict)
     listings: dict[str, Item] = field(default_factory=dict)  # each site's own item
     in_quiver: list[Item] = field(default_factory=list)  # Quiver apps with this repository
-    same_app: list[Item] = field(default_factory=list)  # Quiver apps with its name, under another link (app_names)
+    same_app: list[Item] = field(default_factory=list)  # Quiver apps with its name and its creator, at another link
     same_game: list[Item] = field(default_factory=list)  # Quiver apps for the same game, from another repository
     decision: dict | None = None
     supported_host: bool = True
@@ -512,11 +519,15 @@ def compare(store: Store) -> Comparison:
             names_ |= aliases(moved[0])
         c.in_quiver = list({id(q): q for k in names_ for q in by_key.get(k, [])}.values())
         if not c.in_quiver:
-            # The same app under another link (a fork, a mirror, a re-upload): by every name the sites give it.
+            # The same app at another link (moved host, renamed, re-uploaded): by every name the sites give it, and
+            # only from the same creator. A fork has another owner, and another developer's project called the same
+            # another creator, so neither counts.
             called = app_names(c.title, c.key)
             for listing in c.listings.values():
                 called |= app_names(listing.title, listing.key)
-            c.same_app = list({id(q): q for n in called for q in by_app.get(n, [])}.values())
+            made_by = creators(c.key, c.author, *(i.author for i in c.listings.values()))
+            named = {id(q): q for n in called for q in by_app.get(n, [])}.values()
+            c.same_app = [q for q in named if made_by & creators(q.key, q.author)]
             c.same_game = by_game.get(normalize_title(c.game), [])
         c.decision = store.decisions.get(c.key)
         c.supported_host = c.host in hosts
