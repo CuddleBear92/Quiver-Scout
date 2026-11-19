@@ -85,12 +85,18 @@ Columns include **Latest release**, **Version**, **Last push**, **Listed since**
 - **Hide:** right-click a heading for *Hide*, or tick columns under *Columns*. *Reset columns* puts back the order,
   columns and widths.
 
-Each tab's column order, hidden columns, widths and sorting are saved in `settings.json`. *Game in Quiver* says Quiver already has another app for the same game,
-often a sign it's a fork; the details pane links to it.
+Each tab's column order, hidden columns, widths and sorting are saved in `settings.json`.
+
+*App in Quiver* says Quiver may already have this app under another link: a Quiver app with the same project name
+(as any site names it) or the same repository name, such as a fork, a mirror, or a repository that was renamed or
+moved to another host. **same owner** means that Quiver app is the same account's, so very likely the same app;
+**same name** that it's someone else's, a fork or another project that happens to be called the same. Names too
+common to tell apps apart (recomp, decomp, pc-port...) don't count. The details pane links to them. *Game in
+Quiver* (hidden at first) is looser: Quiver has some app for the same game.
 
 Filters: search (every word must match the project, game, URL, author, platform, method or note), *Listed on*
 (a drop-down of the sites), *Runs on* (a drop-down of the systems projects run on), *New* (in the last refresh),
-*Has a release*, *Hide games in Quiver* and *2+ sites*.
+*Has a release*, *Hide apps in Quiver* and *2+ sites*.
 
 *Runs on* lists every system any site says a project runs on or has builds for (Decomp Buddy's builds, unbaked's and
 OSGL's platforms, RecompLauncher's systems), most common first with a count, and *Not known* for projects no site
@@ -113,7 +119,7 @@ follow too. Alt+F, Alt+V and Alt+H open the menus.
 | F5 / Shift+F5 | Refresh what changed / full refresh |
 | Enter / double-click | Open the repository |
 | Ctrl+Enter | Open its pages on the listing sites |
-| Q | Open in Quiver: the app's page on quiverlauncher.com, or, for a project Quiver doesn't have, the pages of Quiver's apps for the same game |
+| Q | Open in Quiver: the app's page on quiverlauncher.com, or, for a project Quiver doesn't have, the pages of the Quiver apps that may be it (App in Quiver), else of Quiver's apps for the same game |
 | Ctrl+C | Copy the selected rows' URLs |
 | W | Wait for it (on Waiting: change why) |
 | Delete | Blacklist (on Waiting and Blacklist: back to the list) |
