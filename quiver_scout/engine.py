@@ -143,6 +143,14 @@ class Candidate:
         """Runs on Android, by any site's say, or says Android in its name or link."""
         return "Android" in self.runs_on.split(", ") or "android" in f"{self.title} {self.url} {self.game}".lower()
 
+    @property
+    def systems(self) -> list[str]:
+        """What it runs on, for the Runs on filter: the sites' say, and Android when its name or link says so."""
+        out = [s for s in self.runs_on.split(", ") if s]
+        if self.android and "Android" not in out:
+            out.append("Android")
+        return out
+
 
 @dataclass
 class Comparison:
