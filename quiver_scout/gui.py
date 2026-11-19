@@ -16,6 +16,7 @@ from . import __version__, engine, theme
 from .decisions import BLACKLIST, WAIT_REASONS, WAITING
 from .engine import Candidate, Comparison
 from .sources import EXTERNAL, Item
+from .linkcheck import TAKEN_DOWN as TAKEN_DOWN_STATES
 from .store import Store
 
 # Columns: id, heading, width, kind ("date" sorts with empty values last, whichever way).
@@ -40,17 +41,23 @@ COL = {
     "state": ("Now", 120, ""),
     "also_on": ("Also listed on", 200, ""),
     "slug": ("Slug", 180, ""),
+    "link": ("Link", 120, ""),
+    "checked": ("Link checked", 105, "date"),
     "url": ("URL", 300, ""),
 }
 
 TABS = {
     "missing": ("Missing", ["title", "game", "platform", "method", "sources", "released", "version", "pushed", "added",
-                            "first_seen", "runs_on", "same_game", "url"]),
-    "other": ("Other sites", ["title", "game", "host", "sources", "released", "added", "first_seen", "runs_on", "url"]),
+                            "first_seen", "runs_on", "same_game", "link", "checked", "url"]),
+    "other": ("Other sites", ["title", "game", "host", "sources", "released", "added", "first_seen", "runs_on", "link",
+                              "checked", "url"]),
+    "taken": ("Taken down", ["title", "game", "link", "checked", "sources", "released", "pushed", "added", "same_game",
+                             "url"]),
     "waiting": ("Waiting", ["title", "game", "reason", "note", "released", "version", "sources", "since", "by", "state",
-                            "runs_on", "url"]),
-    "blacklist": ("Blacklist", ["title", "game", "note", "since", "by", "state", "url"]),
-    "quiver": ("In Quiver", ["title", "game", "released", "version", "added", "also_on", "slug", "url"]),
+                            "runs_on", "link", "checked", "url"]),
+    "blacklist": ("Blacklist", ["title", "game", "note", "since", "by", "state", "link", "checked", "url"]),
+    "quiver": ("In Quiver", ["title", "game", "released", "version", "added", "also_on", "link", "checked", "slug",
+                             "url"]),
 }
 # The Runs on filter's entry for projects no site says anything about.
 NOT_KNOWN = "Not known"
@@ -59,7 +66,8 @@ NOT_KNOWN = "Not known"
 NOISY = re.compile(r"(pages|records) \d+/\d+|\(\d+\)$")
 
 # Hidden until shown from a heading's right-click menu.
-DEFAULT_HIDDEN = {"missing": ["pushed", "first_seen"], "waiting": ["by", "runs_on"], "blacklist": ["by"]}
+DEFAULT_HIDDEN = {"missing": ["pushed", "first_seen", "checked"], "other": ["checked"], "waiting": ["by", "runs_on", "checked"],
+                  "blacklist": ["by", "checked"], "quiver": ["checked"]}
 
 
 def open_url(url: str) -> None:
@@ -74,6 +82,17 @@ def open_folder(path: str) -> None:
         subprocess.Popen(["open", path])
     else:
         subprocess.Popen(["xdg-open", path])
+
+
+def link_values(link: dict | None) -> dict:
+    """The Link and Link checked columns for a link check result."""
+    from .linkcheck import LABELS
+    if not link:
+        return {"link": "", "checked": ""}
+    text = LABELS.get(link.get("status", ""), link.get("status", ""))
+    if link.get("status") == "moved" and link.get("moved_to"):
+        text = "moved → " + link["moved_to"].split("://", 1)[-1].split("/", 1)[-1]
+    return {"link": text, "checked": link.get("checked", "")}
 
 
 class Table(ttk.Frame):
@@ -131,6 +150,7 @@ class Table(ttk.Frame):
         self.tree.tag_configure("new", font=f["bold"])
         self.tree.tag_configure("dim", foreground=c["dim"])
         self.tree.tag_configure("flag", foreground=c["good"])
+        self.tree.tag_configure("warn", foreground=c["error"])
 
     # ---- which columns, in what order ----------------------------------------------------------------------------
 
@@ -377,6 +397,7 @@ class App:
         self.quiver_rows: dict[str, Item] = {}
         self.events: queue.Queue = queue.Queue()
         self.refreshing = False
+        self.job = "refresh"
         self.dirty: set[str] = set()
         self._search_after = None
         self._links = 0
@@ -401,6 +422,9 @@ class App:
         f.add_command(label="Refresh", accelerator="F5", command=self.refresh)
         f.add_command(label="Full refresh (read everything again)", accelerator="Shift+F5",
                       command=lambda: self.refresh(full=True))
+        f.add_separator()
+        f.add_command(label="Check links (new and due)", accelerator="Ctrl+L", command=self.check_links)
+        f.add_command(label="Check every link again", command=lambda: self.check_links(everything=True))
         f.add_separator()
         f.add_command(label="Export this list as CSV…", accelerator="Ctrl+E", command=self.export_view)
         f.add_command(label="Export every project as CSV…", command=self.export_all)
@@ -582,6 +606,7 @@ class App:
         r.bind("<Shift-F5>", lambda e: self.refresh(full=True))
         r.bind("<Control-f>", lambda e: (self.search_entry.focus_set(), self.search_entry.select_range(0, "end")))
         r.bind("<Control-e>", lambda e: self.export_view())
+        r.bind("<Control-l>", lambda e: self.check_links())
         r.bind("<Control-Return>", lambda e: self.open_pages())
         r.bind("<Escape>", lambda e: self.search.set(""))
         for n in range(len(TABS)):
@@ -714,6 +739,7 @@ class App:
             "same_game": f"yes ({len(c.same_game)})" if c.same_game else "",
             "reason": WAIT_REASONS.get(d.get("reason", ""), d.get("reason", "")), "note": d.get("note", ""),
             "since": d.get("date", ""), "by": d.get("by", ""), "state": state, "url": c.url,
+            **link_values(c.link),
         }
 
     def _lists(self) -> dict[str, list[Candidate]]:
@@ -721,6 +747,7 @@ class App:
         return {
             "missing": self._filtered(r.missing, True),
             "other": self._filtered(r.other_sites, True),
+            "taken": self._filtered(r.taken_down, True),
             "waiting": self._filtered(r.decided(WAITING), False),
             "blacklist": self._filtered(r.decided(BLACKLIST), False),
         }
@@ -734,7 +761,8 @@ class App:
         text = self.search.get().strip().lower()
         self.quiver_shown = [iid for iid, q in self.quiver_rows.items()
                              if not text or self._matches(text, q.title, q.game, q.url, q.slug, q.author)]
-        totals = {"missing": len(r.missing), "other": len(r.other_sites), "waiting": len(r.decided(WAITING)),
+        totals = {"missing": len(r.missing), "other": len(r.other_sites), "taken": len(r.taken_down),
+                  "waiting": len(r.decided(WAITING)),
                   "blacklist": len(r.decided(BLACKLIST)), "quiver": len(r.quiver)}
         for tab, table in self.tables.items():
             shown = len(self.quiver_shown) if tab == "quiver" else len(self.lists[tab])
@@ -762,15 +790,19 @@ class App:
             rows = []
             for iid in self.quiver_shown:
                 q = self.quiver_rows[iid]
-                rows.append((iid, {"title": q.title, "game": q.game, "released": q.released, "version": q.version,
+                link = r.links.get(q.key)
+                rows.append((iid, {**link_values(link), "title": q.title, "game": q.game, "released": q.released,
+                                   "version": q.version,
                                    "added": q.added, "also_on": ", ".join(also.get(q.key, [])), "slug": q.slug,
-                                   "url": q.url}, ()))
+                                   "url": q.url}, ("warn",) if (link or {}).get("status") in TAKEN_DOWN_STATES else ()))
             self.tables[tab].fill(rows)
             return
         rows = []
         for c in self.lists[tab]:
             tags = ()
-            if tab in ("missing", "other") and r.is_new(c):
+            if tab == "taken":
+                tags = ("warn",)
+            elif tab in ("missing", "other") and r.is_new(c):
                 tags = ("new",)
             elif tab in ("waiting", "blacklist"):
                 tags = ("flag",) if c.in_quiver else ("dim",) if not c.listed else ()
@@ -811,9 +843,9 @@ class App:
         on = lambda yes: "normal" if yes else "disabled"  # noqa: E731
         for b in (self.btn_open, self.btn_pages, self.btn_copy):
             b.config(state=on(cur != "log"))
-        self.btn_wait.config(state=on(cur in ("missing", "other", "waiting", "blacklist")),
+        self.btn_wait.config(state=on(cur in ("missing", "other", "taken", "waiting", "blacklist")),
                              text="Change why…  W" if cur == "waiting" else "Wait…  W")
-        self.btn_black.config(state=on(cur in ("missing", "other", "waiting")))
+        self.btn_black.config(state=on(cur in ("missing", "other", "taken", "waiting")))
         self.btn_back.config(state=on(cur in ("waiting", "blacklist")))
 
     def open_repo(self) -> None:
@@ -838,7 +870,7 @@ class App:
             self.status.config(text=f"Copied {len(urls)} URL(s)", style="TLabel")
 
     def delete_key(self) -> None:
-        if self.current() in ("missing", "other"):
+        if self.current() in ("missing", "other", "taken"):
             self.blacklist_selected()
         elif self.current() in ("waiting", "blacklist"):
             self.undecide_selected()
@@ -871,7 +903,7 @@ class App:
         return (cands[0].title or cands[0].url) if len(cands) == 1 else f"{len(cands)} projects"
 
     def wait_selected(self) -> None:
-        if self.current() not in ("missing", "other", "waiting", "blacklist"):
+        if self.current() not in ("missing", "other", "taken", "waiting", "blacklist"):
             return
         cands = self.selected_candidates()
         if not cands:
@@ -888,7 +920,7 @@ class App:
         self._after_decision(keys, f"Waiting for {self._describe(cands)}: {WAIT_REASONS[dlg.result[0]]}")
 
     def blacklist_selected(self) -> None:
-        if self.current() not in ("missing", "other", "waiting"):
+        if self.current() not in ("missing", "other", "taken", "waiting"):
             return
         cands = self.selected_candidates()
         if not cands:
@@ -918,9 +950,11 @@ class App:
         m.add_command(label="Open repository", command=self.open_repo)
         m.add_command(label="Open listing pages", command=self.open_pages)
         m.add_command(label="Copy URL", command=self.copy_urls)
-        if cur in ("missing", "other", "waiting", "blacklist"):
+        m.add_command(label="Check link now", command=self.check_selected_links,
+                      state="disabled" if self.refreshing else "normal")
+        if cur in ("missing", "other", "taken", "waiting", "blacklist"):
             m.add_separator()
-            if cur in ("missing", "other", "blacklist"):
+            if cur in ("missing", "other", "taken", "blacklist"):
                 wait = tk.Menu(m, tearoff=False)
                 for rid, label in WAIT_REASONS.items():
                     wait.add_command(label=label, command=lambda r=rid: self._quick_wait(r))
@@ -939,6 +973,16 @@ class App:
                 for q in cands[0].same_game[:8]:
                     m.add_command(label=f"Quiver has the same game: {q.title}", command=lambda u=q.url: open_url(u))
         m.tk_popup(event.x_root, event.y_root)
+
+    def check_selected_links(self) -> None:
+        keys = [url_key for url_key in (self._key_of(u) for u, _ in self.selected_links()) if url_key]
+        if keys:
+            self.check_links(keys=keys)
+
+    def _key_of(self, url: str) -> str:
+        from .urls import canonical
+        c = canonical(url)
+        return c[0] if c else ""
 
     def _quick_wait(self, reason: str) -> None:
         cands = self.selected_candidates()
@@ -1021,6 +1065,22 @@ class App:
             for s in c.sources:
                 self._link(EXTERNAL[s], c.pages.get(s, ""))
                 d.insert("end", "   ")
+        self._link_line(self.result.links.get(q.key))
+
+    def _link_line(self, link: dict | None) -> None:
+        """What the last link check found, and where a moved one went."""
+        if not link or not link.get("status") or link.get("status") == "suspect":
+            return
+        from .linkcheck import LABELS, TAKEN_DOWN
+        d = self.details
+        self._line("Link")
+        status = link["status"]
+        d.insert("end", LABELS.get(status, status), "warn" if status in TAKEN_DOWN else "flag" if status == "ok" else ())
+        if status == "moved" and link.get("moved_to"):
+            d.insert("end", " to ")
+            self._link(link["moved_to"], link["moved_to"])
+        bits = [link.get("detail", ""), f"checked {link.get('checked', '')}", f"by {link['by']}" if link.get("by") else ""]
+        d.insert("end", "   " + " · ".join(b for b in bits if b), "label")
 
     def _candidate_details(self, c: Candidate) -> None:
         d = self.details
@@ -1063,6 +1123,7 @@ class App:
             for q in c.same_game[:6]:
                 self._link(q.title, q.url)
                 d.insert("end", "   ")
+        self._link_line(c.link)
         dec = c.decision
         if dec:
             self._line("Waiting for" if dec.get("list") == WAITING else "Blacklisted")
@@ -1085,14 +1146,33 @@ class App:
                 "Full refresh", "Read everything again, ignoring what's cached? PlayPorted alone is about 2,100 pages "
                 "and takes a few minutes."):
             return
-        self.refreshing = True
-        self.refresh_btn.config(state="disabled")
-        self.status.config(text="Refreshing…", style="TLabel")
         self.log("--- Full refresh started" if full else "--- Refresh started")
+        self._start("refresh", "Refreshing…", lambda say: engine.refresh(self.store, say, full=full))
+
+    def check_links(self, everything: bool = False, keys: list[str] | None = None) -> None:
+        """Check links that are due, or every link, or the selected rows' (keys)."""
+        if self.refreshing:
+            return
+        if everything and not messagebox.askyesno(
+                "Check every link", "Check every project's link again, even ones checked lately? With a GitHub token "
+                "that's a few hundred requests; without one, thousands of page loads."):
+            return
+        if keys is None and not self.store.tokens().get("github"):
+            self.log("No GitHub token: GitHub links are checked one page at a time. Add a token in File → Settings → "
+                     "API keys to check thousands in a minute.")
+        self.log("--- Link check started")
+        self._start("links", "Checking links…",
+                    lambda say: engine.check_links(self.store, say, keys=keys, everything=everything))
+
+    def _start(self, job: str, text: str, work_fn) -> None:
+        self.refreshing = True
+        self.job = job
+        self.refresh_btn.config(state="disabled")
+        self.status.config(text=text, style="TLabel")
 
         def work():
             try:
-                result = engine.refresh(self.store, lambda m, d=0, t=0: self.events.put(("progress", m, d, t)), full=full)
+                result = work_fn(lambda m, d=0, t=0: self.events.put(("progress", m, d, t)))
                 self.events.put(("done", result, 0, 0))
             except Exception as e:  # noqa: BLE001
                 self.events.put(("failed", str(e), 0, 0))
@@ -1116,13 +1196,19 @@ class App:
                     self.progress.config(mode="determinate", value=0)
                     if kind == "failed":
                         self.log("ERROR " + a, error=True)
-                        self.status.config(text=f"Refresh failed: {a}", style="Error.TLabel")
+                        self.status.config(text=f"{'Refresh' if self.job == 'refresh' else 'Link check'} failed: {a}",
+                                           style="Error.TLabel")
+                        return
+                    self.reload()
+                    if self.job == "links":
+                        down = len(self.result.taken_down)
+                        self.status.config(text=f"Links checked: {a.get('checked', 0)}. {down} listed project(s) "
+                                                f"taken down.", style="TLabel")
                         return
                     for e in a.get("errors", []):
                         self.log("ERROR " + e, error=True)
                     took = sum(s.get("seconds", 0) for s in a.get("sources", {}).values())
                     self.log(f"Finished in {took:.0f} s. {a.get('new', 0)} project(s) seen for the first time.")
-                    self.reload()
                     if not a.get("errors"):
                         self.status.config(text=f"Refreshed. {a.get('new', 0)} new project(s).", style="TLabel")
                     return
@@ -1154,7 +1240,7 @@ class App:
             items = [self.quiver_rows[i] for i in self.tables["quiver"].tree.get_children()]
             path = self._ask_path("quiver-catalog.csv")
             if path:
-                n = engine.write_quiver_csv(path, items)
+                n = engine.write_quiver_csv(path, items, self.result.links)
                 self.status.config(text=f"Wrote {n} rows to {path}", style="TLabel")
             return
         rows = [self.candidates[k] for k in self.tables[cur].tree.get_children() if k in self.candidates]
@@ -1172,7 +1258,7 @@ class App:
     def export_quiver(self) -> None:
         path = self._ask_path("quiver-catalog.csv")
         if path and self.result:
-            n = engine.write_quiver_csv(path, self.result.quiver)
+            n = engine.write_quiver_csv(path, self.result.quiver, self.result.links)
             self.status.config(text=f"Wrote {n} rows to {path}", style="TLabel")
 
     def settings_dialog(self) -> None:
@@ -1181,69 +1267,153 @@ class App:
         w.title("Settings")
         w.transient(self.root)
         w.resizable(False, False)
-        body = ttk.Frame(w, padding=16)
-        body.pack(fill="both")
+        outer = ttk.Frame(w, padding=12)
+        outer.pack(fill="both")
+        tabs = ttk.Notebook(outer)
+        tabs.pack(fill="both")
         bold = self.c["fonts"]["bold"]
 
-        ttk.Label(body, text="Sites to read on Refresh", font=bold).grid(row=0, column=0, columnspan=3, sticky="w")
+        def page(title: str) -> ttk.Frame:
+            f = ttk.Frame(tabs, padding=14)
+            tabs.add(f, text=title)
+            return f
+
+        def heading(parent, r: int, text: str, hint: str = "") -> int:
+            ttk.Label(parent, text=text, font=bold).grid(row=r, column=0, columnspan=4, sticky="w", pady=(12 if r else 0, 0))
+            if hint:
+                ttk.Label(parent, text=hint, style="Muted.TLabel").grid(row=r + 1, column=0, columnspan=4, sticky="w")
+            return r + 2
+
+        # ---- Sites
+        sites = page("Sites")
+        r = heading(sites, 0, "Sites to read on Refresh")
         src = {}
-        for n, (sid, label) in enumerate(EXTERNAL.items(), start=1):
+        for sid, label in EXTERNAL.items():
             src[sid] = tk.BooleanVar(value=s["sources"].get(sid, True))
-            ttk.Checkbutton(body, text=label, variable=src[sid]).grid(row=n, column=0, columnspan=3, sticky="w", pady=1)
-        row = len(EXTERNAL) + 1
-        options = ttk.Frame(body)
-        options.grid(row=row, column=0, columnspan=3, sticky="w", pady=(6, 0))
+            ttk.Checkbutton(sites, text=label, variable=src[sid]).grid(row=r, column=0, columnspan=4, sticky="w", pady=1)
+            r += 1
         full = tk.BooleanVar(value=bool(s.get("unbaked_full_scan")))
-        ttk.Checkbutton(options, text="unbaked: read every game's record, not only recent additions\n"
+        ttk.Checkbutton(sites, text="unbaked: read every game's record, not only recent additions\n"
                         "(about 6,000 requests the first time; later only games with new pushes)",
-                        variable=full).pack(anchor="w")
+                        variable=full).grid(row=r, column=0, columnspan=4, sticky="w", pady=(8, 0))
         clones = tk.BooleanVar(value=bool(s.get("include_clones")))
-        ttk.Checkbutton(options, text="Include clones: new games in the style of an old one, which OSGameClones,\n"
+        ttk.Checkbutton(sites, text="Include clones: new games in the style of an old one, which OSGameClones,\n"
                         "Cloned Games and OSGL list many of (not ports of the game itself)",
-                        variable=clones).pack(anchor="w", pady=(6, 0))
+                        variable=clones).grid(row=r + 1, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        links_on = tk.BooleanVar(value=bool(s.get("check_links", True)))
+        ttk.Checkbutton(sites, text="Check links that are due after each refresh (needs a GitHub token,\n"
+                        "see API keys; without one, use File → Check links)",
+                        variable=links_on).grid(row=r + 2, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
-        def path_row(r, label, value, hint, save):
-            ttk.Label(body, text=label, font=bold).grid(row=r, column=0, columnspan=3, sticky="w", pady=(14, 0))
-            ttk.Label(body, text=hint, style="Muted.TLabel").grid(row=r + 1, column=0, columnspan=3, sticky="w")
+        def path_row(parent, r, label, value, hint, save, kind):
+            r = heading(parent, r, label, hint)
             var = tk.StringVar(value=value)
-            ttk.Entry(body, textvariable=var, width=60).grid(row=r + 2, column=0, sticky="we", pady=(4, 0))
-            kind = ("JSON", "*.json") if save else ("CSV", "*.csv")
+            ttk.Entry(parent, textvariable=var, width=60).grid(row=r, column=0, sticky="we", pady=(4, 0))
             ask = filedialog.asksaveasfilename if save else filedialog.askopenfilename
-            ttk.Button(body, text="Browse…", command=lambda: var.set(
-                ask(parent=w, filetypes=[kind, ("All files", "*.*")]) or var.get())).grid(row=r + 2, column=1, padx=4)
-            ttk.Button(body, text="Clear", command=lambda: var.set("")).grid(row=r + 2, column=2)
-            return var
+            ttk.Button(parent, text="Browse…", command=lambda: var.set(
+                ask(parent=w, filetypes=[kind, ("All files", "*.*")]) or var.get())).grid(row=r, column=1, padx=4)
+            ttk.Button(parent, text="Clear", command=lambda: var.set("")).grid(row=r, column=2)
+            return var, r + 1
 
-        csv_var = path_row(row + 1, "Quiver catalog", s.get("quiver_csv", ""),
-                           "Empty: read api.quiverlauncher.com. Or pick a CSV export with a URL column\n"
-                           "(and title, game, slug columns if it has them).", False)
-        dec_var = path_row(row + 4, "Decisions file (Waiting and Blacklist)", s.get("decisions_path", ""),
-                           "Empty: decisions.json in the data folder. Point it at a shared folder or a git checkout\n"
-                           "to share it with other maintainers. A file that doesn't exist yet starts with yours.", True)
-        ttk.Label(body, text="Your name", font=bold).grid(row=row + 7, column=0, columnspan=3, sticky="w", pady=(14, 0))
-        ttk.Label(body, text="Put on what you wait for or blacklist, for maintainers sharing the decisions file.",
-                  style="Muted.TLabel").grid(row=row + 8, column=0, columnspan=3, sticky="w")
+        csv_var, _ = path_row(sites, r + 3, "Quiver catalog", s.get("quiver_csv", ""),
+                              "Empty: read api.quiverlauncher.com. Or pick a CSV export with a URL column\n"
+                              "(and title, game, slug columns if it has them).", False, ("CSV", "*.csv"))
+
+        # ---- Sharing
+        share = page("Sharing")
+        dec_var, r = path_row(share, 0, "Decisions file (Waiting and Blacklist)", s.get("decisions_path", ""),
+                              "Empty: decisions.json in the data folder. Point it at a shared folder or a git\n"
+                              "checkout to share it with other maintainers. A new file starts with yours.",
+                              True, ("JSON", "*.json"))
+        down_var, r = path_row(share, r, "Taken-down list", s.get("taken_down_path", ""),
+                               "Links found taken down or moved. Empty: taken-down.json in the data folder.\n"
+                               "Shared, maintainers use each other's checks instead of checking again.",
+                               True, ("JSON", "*.json"))
+        r = heading(share, r, "Your name", "Put on your decisions and link checks, for maintainers sharing them.")
         name_var = tk.StringVar(value=s.get("your_name", ""))
-        ttk.Entry(body, textvariable=name_var, width=30).grid(row=row + 9, column=0, sticky="w", pady=(4, 0))
+        ttk.Entry(share, textvariable=name_var, width=30).grid(row=r, column=0, sticky="w", pady=(4, 0))
+
+        # ---- API keys
+        keys = page("API keys")
+        tokens = self.store.tokens()
+        token_vars = {}
+        r = heading(keys, 0, "Tokens for checking links",
+                    "Kept in tokens.json in the data folder, not in settings.json. Never share that file.\n"
+                    "Neither token needs any permissions: public repositories are all it reads.")
+        from .linkcheck import GITHUB_TOKEN_PAGE, GITLAB_TOKEN_PAGE
+        for site, label, url, hint in (
+                ("github", "GitHub token", GITHUB_TOKEN_PAGE,
+                 "Checks 50 repositories a request instead of loading each page. Create a classic token\n"
+                 "with no scopes ticked, and paste it here."),
+                ("gitlab", "GitLab token", GITLAB_TOKEN_PAGE,
+                 "Optional: raises GitLab's limits. The link opens the form with read_api ticked.")):
+            r = heading(keys, r, label, hint)
+            var = tk.StringVar(value=tokens.get(site, ""))
+            token_vars[site] = var
+            entry = ttk.Entry(keys, textvariable=var, width=48, show="•")
+            entry.grid(row=r, column=0, sticky="we", pady=(4, 0))
+            ttk.Button(keys, text="Create a token ↗", command=lambda u=url: open_url(u)).grid(row=r, column=1, padx=4)
+            ttk.Button(keys, text="Show", command=lambda e=entry: e.configure(
+                show="" if e.cget("show") else "•")).grid(row=r, column=2)
+            result = ttk.Label(keys, text="", style="Muted.TLabel")
+            result.grid(row=r + 1, column=0, columnspan=4, sticky="w")
+            ttk.Button(keys, text="Test", command=lambda st=site, v=var, lab=result: self._test_token(st, v.get(), lab)
+                       ).grid(row=r, column=3, padx=(4, 0))
+            r += 2
 
         def save():
             s["sources"] = {k: v.get() for k, v in src.items()}
             s["unbaked_full_scan"] = full.get()
             s["include_clones"] = clones.get()
+            s["check_links"] = links_on.get()
             s["quiver_csv"] = csv_var.get().strip()
             s["decisions_path"] = dec_var.get().strip()
+            s["taken_down_path"] = down_var.get().strip()
             s["your_name"] = name_var.get().strip()
             self.store.save_settings()
+            self.store.save_tokens({k: v.get() for k, v in token_vars.items()})
             w.destroy()
             self.reload()
             self.status.config(text="Settings saved. Refresh (F5) to read the sites with them.", style="TLabel")
 
-        buttons = ttk.Frame(body)
-        buttons.grid(row=row + 10, column=0, columnspan=3, sticky="e", pady=(16, 0))
+        buttons = ttk.Frame(outer)
+        buttons.pack(fill="x", pady=(12, 0))
         ttk.Button(buttons, text="Cancel", command=w.destroy).pack(side="right")
         ttk.Button(buttons, text="Save", style="Accent.TButton", command=save).pack(side="right", padx=6)
         theme.dark_title_bar(w, self.c["dark"])
         w.grab_set()
+
+    def _test_token(self, site: str, token: str, label: ttk.Label) -> None:
+        """Ask GitHub or GitLab who the token belongs to, in the background, and say so under it."""
+        token = token.strip()
+        if not token:
+            label.configure(text="No token to test.", style="Muted.TLabel")
+            return
+        label.configure(text="Testing…", style="Muted.TLabel")
+
+        def work():
+            import json as _json
+            import urllib.error
+            import urllib.request
+            if site == "github":
+                req = urllib.request.Request("https://api.github.com/user", headers={
+                    "Authorization": f"bearer {token}", "User-Agent": "quiver-scout"})
+            else:
+                req = urllib.request.Request("https://gitlab.com/api/v4/user", headers={
+                    "PRIVATE-TOKEN": token, "User-Agent": "quiver-scout"})
+            try:
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    who = _json.loads(resp.read())
+                    left = resp.headers.get("X-RateLimit-Remaining")
+                text = f"Works: {who.get('login') or who.get('username')}" + (f", {left} requests left this hour" if left else "")
+                style = "TLabel"
+            except urllib.error.HTTPError as e:
+                text, style = f"Refused (HTTP {e.code}): check the token.", "Error.TLabel"
+            except Exception as e:  # noqa: BLE001
+                text, style = f"Couldn't ask: {e}", "Error.TLabel"
+            self.root.after(0, lambda: label.winfo_exists() and label.configure(text=text, style=style))
+
+        threading.Thread(target=work, daemon=True).start()
 
 
 def run(data_dir: str | None = None) -> int:

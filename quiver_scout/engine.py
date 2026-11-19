@@ -12,12 +12,15 @@ from .sources import (EXTERNAL, Context, Item, clonedgames, decompbuddy, osgamec
                       recomplauncher, trilarion, unbaked)
 from .sources.base import Progress, day, no_progress
 from .store import Store
-from .urls import aliases, normalize_title
+from .urls import aliases, canonical, normalize_title
 
-# Code hosts Quiver Launcher reads releases from. Self-hosted Gitea/Forgejo sites count once Quiver lists an app
-# from them. Projects anywhere else go to "Other sites": Quiver would need to support that site first.
-FORGE_HOSTS = {"github.com", "gitlab.com", "codeberg.org", "bitbucket.org"}
-FORGE_PROVIDERS = {"github", "gitlab", "gitea", "bitbucket"}
+# Code hosts Quiver Launcher and its catalog read releases from: GitHub, GitLab, and Forgejo/Gitea, whose known
+# servers are these (the launcher's own list, providers/gitea.ts) plus any found by asking (forges.py) or that Quiver
+# already has an app from. Bitbucket has a provider in the launcher's code but no app in the catalog, so it isn't
+# counted. Projects anywhere else go to "Other sites": Quiver would need to support that site first.
+GITEA_HOSTS = {"codeberg.org", "gitea.com", "git.ryujinx.app", "git.eden-emu.dev", "try.gitea.io"}
+FORGE_HOSTS = {"github.com", "gitlab.com", *GITEA_HOSTS}
+FORGE_PROVIDERS = {"github", "gitlab", "gitea"}
 
 ORDER = ["quiver", *EXTERNAL]
 
@@ -100,8 +103,79 @@ def refresh(store: Store, progress: Progress = no_progress, full: bool = False) 
     result = {"refreshed_at": now, "previous_refresh": old.get("refreshed_at", ""), "errors": errors,
               "sources": status, "new": 0 if first_run else len(new)}
     store.set_meta("refresh", result)
+
+    # Links that are due a check, if that's on. Without a GitHub token, GitHub is checked one page at a time, which
+    # for thousands of new links takes long, so then it's only done when asked (File -> Check links).
+    if store.settings.get("check_links", True) and store.tokens().get("github"):
+        try:
+            result["links"] = check_links(store, progress)
+        except Exception as e:
+            progress(f"Link check failed: {e}", 1, 1)
     progress("Done" + (f", with {len(errors)} error(s)" if errors else ""), 1, 1)
     return result
+
+
+def link_states(store: Store) -> dict[str, dict]:
+    """Each link's last check: this computer's, or the shared file's when that is newer (another maintainer's)."""
+    out = store.links()
+    for key, shared in store.taken_down.entries.items():
+        mine = out.get(key)
+        if not mine or shared.get("checked", "") > mine.get("checked", ""):
+            out[key] = shared
+    return out
+
+
+def host_kinds(store: Store, quiver_items: list[Item]) -> dict[str, str]:
+    """host -> "gitlab" or "gitea", for checking links through their APIs."""
+    kinds = {h: "gitea" for h in GITEA_HOSTS}
+    kinds["gitlab.com"] = "gitlab"
+    for q in quiver_items:
+        if q.extra.get("provider") in ("gitea", "gitlab") and q.key:
+            kinds[q.key.split("/")[0]] = q.extra["provider"]
+    for h, v in store.meta("forges", {}).items():
+        if v.get("kind"):
+            kinds[h] = "gitea"
+    return kinds
+
+
+def check_links(store: Store, progress: Progress = no_progress, keys: list[str] | None = None,
+                everything: bool = False) -> dict:
+    """Check the links of every project (listed on a site, waited for, blacklisted) and every Quiver app that are due,
+    or just `keys`, or all of them. Saves what's found, and puts taken-down and moved ones in the shared file.
+    Returns counts."""
+    from datetime import date
+
+    from . import linkcheck
+
+    items = [Item.from_dict(d) for d in store.items()]
+    urls: dict[str, str] = {}
+    for i in items:
+        urls.setdefault(i.key, i.url)
+    for k, d in store.decisions.entries.items():
+        urls.setdefault(k, d.get("url", ""))
+    states = link_states(store)
+    today = date.today()
+    if keys is not None:
+        todo = [k for k in keys if urls.get(k)]
+    else:
+        todo = [k for k in urls if urls[k] and (everything or linkcheck.due(states.get(k), today))]
+    if not todo:
+        progress("Link check: nothing due", 1, 1)
+        return {"checked": 0}
+    progress(f"Link check: {len(todo)} link(s)", 0, len(todo))
+    found = linkcheck.check([(k, urls[k]) for k in todo], host_kinds(store, [i for i in items if i.source == "quiver"]),
+                            store.tokens(), progress)
+    mine = store.links()
+    entries = {k: linkcheck.merge(mine.get(k), r, today.isoformat()) for k, r in found.items()}
+    store.save_links(entries)
+    shared = store.taken_down.update(entries, urls, by=store.settings.get("your_name", ""))
+    counts: dict[str, int] = {}
+    for e in entries.values():
+        counts[e["status"]] = counts.get(e["status"], 0) + 1
+    down = sum(n for s, n in counts.items() if s in linkcheck.TAKEN_DOWN)
+    progress(f"Link check: {len(entries)} of {len(todo)} checked, {down} taken down, {counts.get('moved', 0)} moved"
+             + (f"; {shared} change(s) to the shared list" if shared else ""), 1, 1)
+    return {"checked": len(entries), **counts}
 
 
 @dataclass
@@ -129,6 +203,16 @@ class Candidate:
     decision: dict | None = None
     supported_host: bool = True
     forge: str = ""  # "forgejo" or "gitea" when its site was found to be a self-hosted one
+    link: dict | None = None  # the last link check (linkcheck.py): status, checked, moved_to...
+
+    @property
+    def link_status(self) -> str:
+        return (self.link or {}).get("status", "")
+
+    @property
+    def taken_down(self) -> bool:
+        from .linkcheck import TAKEN_DOWN
+        return self.link_status in TAKEN_DOWN
 
     @property
     def host(self) -> str:
@@ -158,8 +242,15 @@ class Comparison:
     candidates: list[Candidate]
     refresh: dict
 
+    links: dict = field(default_factory=dict)  # key -> last link check, for Quiver's apps too
+
     def _open(self) -> list[Candidate]:
-        return [c for c in self.candidates if c.listed and not c.in_quiver and not c.decision]
+        return [c for c in self.candidates if c.listed and not c.in_quiver and not c.decision and not c.taken_down]
+
+    @property
+    def taken_down(self) -> list[Candidate]:
+        """Not in Quiver, not decided on, and its link is taken down."""
+        return [c for c in self.candidates if c.listed and not c.in_quiver and not c.decision and c.taken_down]
 
     @property
     def missing(self) -> list[Candidate]:
@@ -183,8 +274,8 @@ class Comparison:
 
 
 def supported_hosts(quiver_items: list[Item], forge_sites: dict | None = None) -> set[str]:
-    """Sites Quiver reads releases from: GitHub, GitLab, Codeberg, Bitbucket, any self-hosted site Quiver already has
-    an app from, and any site found to be a Forgejo or Gitea server."""
+    """Sites Quiver reads releases from: GitHub, GitLab, the known Forgejo/Gitea servers, any self-hosted site Quiver
+    already has an app from, and any site found to be a Forgejo or Gitea server."""
     hosts = set(FORGE_HOSTS)
     for q in quiver_items:
         if q.extra.get("provider", "github") in FORGE_PROVIDERS and q.key:
@@ -248,8 +339,15 @@ def compare(store: Store) -> Comparison:
             merged[key] = Candidate(key=key, url=d.get("url", ""), title=d.get("title", ""), game=d.get("game", ""),
                                     first_seen=seen.get(key, ""))
 
+    links = link_states(store)
     for c in merged.values():
-        c.in_quiver = [q for k in aliases(c.key) for q in by_key.get(k, [])]
+        c.link = links.get(c.key)
+        # A renamed repository may be in Quiver under its new name.
+        names_ = set(aliases(c.key))
+        moved = canonical((c.link or {}).get("moved_to", "")) if c.link_status == "moved" else None
+        if moved:
+            names_ |= aliases(moved[0])
+        c.in_quiver = list({id(q): q for k in names_ for q in by_key.get(k, [])}.values())
         if not c.in_quiver:
             c.same_game = by_game.get(normalize_title(c.game), [])
         c.decision = store.decisions.get(c.key)
@@ -260,6 +358,7 @@ def compare(store: Store) -> Comparison:
         quiver=quiver_items,
         candidates=sorted(merged.values(), key=lambda c: (c.game or c.title).lower()),
         refresh=store.meta("refresh", {}),
+        links=links,
     )
 
 
@@ -275,19 +374,21 @@ def undecide(store: Store, keys: list[str]) -> None:
 # ---- CSV exports -------------------------------------------------------------------------------------------------
 
 QUIVER_COLUMNS = ["title", "game", "url", "provider", "slug", "developer", "type", "added", "latest_release",
-                  "version", "quiver_page"]
+                  "version", "quiver_page", "link", "link_checked", "moved_to"]
 CANDIDATE_COLUMNS = ["title", "game", "url", "host", "sources", "method", "platform", "author", "listed_since",
                      "latest_release", "version", "last_push", "first_seen", "status", "waiting_for", "note",
-                     "quiver_apps_for_same_game", *[f"{s}_page" for s in EXTERNAL]]
+                     "quiver_apps_for_same_game", "link", "link_checked", "moved_to", *[f"{s}_page" for s in EXTERNAL]]
 
 
-def write_quiver_csv(path: str, quiver_items: list[Item]) -> int:
+def write_quiver_csv(path: str, quiver_items: list[Item], links: dict | None = None) -> int:
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(QUIVER_COLUMNS)
         for q in sorted(quiver_items, key=lambda q: q.title.lower()):
+            link = (links or {}).get(q.key) or {}
             w.writerow([q.title, q.game, q.url, q.extra.get("provider", ""), q.slug, q.author, q.method, q.added,
-                        q.released, q.version, q.page])
+                        q.released, q.version, q.page, link.get("status", ""), link.get("checked", ""),
+                        link.get("moved_to", "")])
     return len(quiver_items)
 
 
@@ -296,6 +397,8 @@ def status_of(c: Candidate) -> str:
         return "in quiver"
     if c.decision:
         return c.decision.get("list", "")
+    if c.taken_down:
+        return "taken down"
     return "missing" if c.supported_host else "other site"
 
 
@@ -309,9 +412,11 @@ def write_candidates_csv(path: str, candidates: list[Candidate]) -> int:
                 c.title, c.game, c.url, c.host, ", ".join(EXTERNAL[s] for s in c.sources), c.method, c.platform,
                 c.author, c.added, c.released, c.version, c.pushed, "" if c.first_seen == "initial" else c.first_seen,
                 status_of(c), WAIT_REASONS.get(d.get("reason", ""), "") if d.get("list") == WAITING else "",
-                d.get("note", ""), "; ".join(q.title for q in c.same_game), *[c.pages.get(s, "") for s in EXTERNAL],
+                d.get("note", ""), "; ".join(q.title for q in c.same_game), c.link_status,
+                (c.link or {}).get("checked", ""), (c.link or {}).get("moved_to", ""), *[c.pages.get(s, "") for s in EXTERNAL],
             ])
     return len(candidates)
 
 
-__all__ = ["BLACKLIST", "WAITING", "Candidate", "Comparison", "compare", "decide", "refresh", "undecide"]
+__all__ = ["BLACKLIST", "WAITING", "Candidate", "Comparison", "check_links", "compare", "decide", "refresh",
+           "undecide"]

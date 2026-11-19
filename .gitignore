@@ -6,3 +6,4 @@ dist/
 .venv/
 *.csv
 !tests/fixtures/*.csv
+tokens.json
