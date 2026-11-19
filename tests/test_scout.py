@@ -608,7 +608,8 @@ class Compare(unittest.TestCase):
                                                                  "github.com/dev/fine": {"status": "ok"},
                                                                  "codeberg.org/dev/game": {"status": "ok"}}), \
                 mock.patch.object(replacements, "_exists", return_value=None), \
-                mock.patch.object(replacements, "_search", return_value=[]):
+                mock.patch.object(replacements, "_search", return_value=[]), \
+                mock.patch.object(engine, "verify_quiver_live", return_value={}):
             counts = engine.check_links(self.store)
         self.assertEqual(counts["replacements"], 1)
         r = engine.compare(self.store)
@@ -618,10 +619,42 @@ class Compare(unittest.TestCase):
         self.assertEqual(self.store.taken_down.get("github.com/dev/game")["replacements"][0]["how"], "same owner and name")
         # The next check of the same link keeps what was found, and isn't looked for again the same day.
         with mock.patch.object(linkcheck, "check", return_value={"github.com/dev/game": {"status": "blocked"}}), \
-                mock.patch.object(replacements, "find") as f:
+                mock.patch.object(replacements, "find") as f, \
+                mock.patch.object(engine, "verify_quiver_live", return_value={}):
             engine.check_links(self.store, keys=["github.com/dev/game"])
         f.assert_not_called()
         self.assertTrue(engine.compare(self.store).links["github.com/dev/game"]["replacements"])
+
+
+    def test_live_check_drops_archived_and_follows_changed_repositories(self):
+        self.put([Item("quiver", "https://github.com/dev/archived", "Archived", slug="archived"),
+                  Item("quiver", "https://github.com/dev/old-name", "Renamed", slug="renamed"),
+                  Item("quiver", "https://github.com/dev/still-down", "Still down", slug="still"),
+                  Item("quiver", "https://github.com/dev/fine", "Fine", slug="fine")])
+        self.store.save_links({k: {"status": "gone", "checked": "2026-11-19"} for k in
+                               ("github.com/dev/archived", "github.com/dev/old-name", "github.com/dev/still-down")})
+        self.assertEqual(len(engine.compare(self.store).quiver_down), 3)
+        asked = []
+
+        def live(url, **kw):
+            asked.append(url.rsplit("/", 1)[-1])
+            if url.endswith("/archived"):
+                raise net.HTTPStatusError("404", 404)
+            repo = "dev/new-name" if url.endswith("/renamed") else "dev/still-down"
+            return net.Response(200, json.dumps({"project": {"provider": "github", "repository": repo}}).encode())
+        with mock.patch.object(net, "request", side_effect=live):
+            counts = engine.verify_quiver_live(self.store)
+        self.assertEqual(sorted(asked), ["archived", "renamed", "still"])  # only the apps in Down in Quiver
+        self.assertEqual((counts["archived"], counts["changed"]), (1, 1))
+        r = engine.compare(self.store)
+        self.assertEqual([q.slug for q in r.quiver_down], ["still"])
+        self.assertNotIn("archived", [q.slug for q in r.quiver])
+        self.assertEqual(next(q for q in r.quiver if q.slug == "renamed").key, "github.com/dev/new-name")
+        # An archived app is asked again (it may come back); one gone from the catalog is forgotten.
+        self.put([Item("quiver", "https://github.com/dev/still-down", "Still down", slug="still")])
+        with mock.patch.object(net, "request", side_effect=live):
+            engine.verify_quiver_live(self.store)
+        self.assertEqual(self.store.meta("quiver_live"), {})
 
 
     def test_csv_exports(self):

@@ -74,7 +74,7 @@ pip install .
 | **Waiting** | Projects you're waiting on, and why: Quiver must support its site first, no source code yet, no release file yet, or something else, with a note. A green row is in Quiver now, so you can take it off the list. |
 | **Blacklist** | Projects you decided not to add, with a note. Grey rows are no longer listed anywhere. |
 | **In Quiver** | Quiver's catalog, each app's latest release, and which other sites also list it. |
-| **Down in Quiver** | Quiver's own live apps whose repository is taken down, to archive them or swap in a new host. Green rows have a possible replacement (see below). |
+| **Down in Quiver** | Quiver's own live apps whose repository is taken down, to archive them or swap in a new host. Green rows have a possible replacement (see below). Apps you archive, or whose repository you change, leave it (see *Live check*). |
 | **Log** | What each refresh did, and any site that failed. |
 
 Columns include **Latest release**, **Version**, **Last push**, **Listed since**, **First seen** and **Runs on**.
@@ -155,6 +155,18 @@ their APIs, other sites by asking for the page. Right-click a row for *Check lin
 A link is checked again after 14 days if it was fine, 60 if it was taken down, and a day if its site didn't answer.
 With a GitHub token, links that are due are checked after every refresh (Settings → Sites can turn that off). In
 the In Quiver tab, Quiver apps whose own link is taken down are red.
+
+### Live check of Down in Quiver
+
+The catalog Quiver Scout reads from api.quiverlauncher.com is Cloudflare's cached copy, which can be up to 20
+minutes behind. So that an app you've just archived, or whose repository you've just changed, leaves Down in Quiver
+straight away, every app in that tab is asked about on Quiver's live (uncached) API, one request each:
+
+- archived (the live API doesn't know it): left out from then on, and forgotten once the cached catalog drops it,
+- repository changed: the app gets its new repository, which is checked with the next link check.
+
+This runs after every refresh and every link check; **File → Check Down in Quiver against live Quiver**, or
+right-click rows in the tab, runs it now. Archived apps are asked again each time, in case they're brought back.
 
 ### Replacements for taken-down repositories
 
