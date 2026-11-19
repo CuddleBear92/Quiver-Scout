@@ -42,6 +42,7 @@ COL = {
     "also_on": ("Also listed on", 200, ""),
     "slug": ("Slug", 180, ""),
     "link": ("Link", 120, ""),
+    "replacement": ("Possible replacement", 280, ""),
     "checked": ("Link checked", 105, "date"),
     "url": ("URL", 300, ""),
 }
@@ -51,19 +52,24 @@ TABS = {
                             "first_seen", "runs_on", "same_game", "link", "checked", "url"]),
     "other": ("Other sites", ["title", "game", "host", "sources", "released", "added", "first_seen", "runs_on", "link",
                               "checked", "url"]),
-    "taken": ("Taken down", ["title", "game", "link", "checked", "sources", "released", "pushed", "added", "same_game",
-                             "url"]),
+    "taken": ("Taken down", ["title", "game", "link", "checked", "replacement", "sources", "released", "pushed", "added",
+                             "same_game", "url"]),
     "waiting": ("Waiting", ["title", "game", "reason", "note", "released", "version", "sources", "since", "by", "state",
                             "runs_on", "link", "checked", "url"]),
     "blacklist": ("Blacklist", ["title", "game", "note", "since", "by", "state", "link", "checked", "url"]),
     "quiver": ("In Quiver", ["title", "game", "released", "version", "added", "also_on", "link", "checked", "slug",
                              "url"]),
+    "qdown": ("Down in Quiver", ["title", "game", "link", "checked", "replacement", "released", "version", "added", "slug",
+                                 "url"]),
 }
 # The Runs on filter's entry for projects no site says anything about.
 NOT_KNOWN = "Not known"
 
 # Progress messages that only count up, shown in the status line but not kept in the log.
 NOISY = re.compile(r"(pages|records) \d+/\d+|\(\d+\)$")
+
+# Tabs whose rows are Quiver's own apps.
+QUIVER_TABS = ("quiver", "qdown")
 
 # Hidden until shown from a heading's right-click menu.
 DEFAULT_HIDDEN = {"missing": ["pushed", "first_seen", "checked"], "other": ["checked"], "waiting": ["by", "runs_on", "checked"],
@@ -116,11 +122,17 @@ def link_values(link: dict | None) -> dict:
     """The Link and Link checked columns for a link check result."""
     from .linkcheck import LABELS
     if not link:
-        return {"link": "", "checked": ""}
+        return {"link": "", "checked": "", "replacement": ""}
     text = LABELS.get(link.get("status", ""), link.get("status", ""))
     if link.get("status") == "moved" and link.get("moved_to"):
         text = "moved → " + link["moved_to"].split("://", 1)[-1].split("/", 1)[-1]
-    return {"link": text, "checked": link.get("checked", "")}
+    found = link.get("replacements") or []
+    replacement = ""
+    if found:
+        replacement = found[0]["url"].split("://", 1)[-1] + (f"  (+{len(found) - 1})" if len(found) > 1 else "")
+    elif link.get("replacements_checked"):
+        replacement = "none found"
+    return {"link": text, "checked": link.get("checked", ""), "replacement": replacement}
 
 
 class Table(ttk.Frame):
@@ -868,11 +880,14 @@ class App:
         text = self.search.get().strip().lower()
         self.quiver_shown = [iid for iid, q in self.quiver_rows.items()
                              if not text or self._matches(text, q.title, q.game, q.url, q.slug, q.author)]
+        down = {q.key for q in r.quiver_down}
+        self.qdown_shown = [iid for iid in self.quiver_shown if self.quiver_rows[iid].key in down]
         totals = {"missing": len(r.missing), "other": len(r.other_sites), "taken": len(r.taken_down),
                   "waiting": len(r.decided(WAITING)),
-                  "blacklist": len(r.decided(BLACKLIST)), "quiver": len(r.quiver)}
+                  "blacklist": len(r.decided(BLACKLIST)), "quiver": len(r.quiver), "qdown": len(r.quiver_down)}
         for tab, table in self.tables.items():
-            shown = len(self.quiver_shown) if tab == "quiver" else len(self.lists[tab])
+            shown = {"quiver": len(self.quiver_shown), "qdown": len(self.qdown_shown)}.get(tab) \
+                if tab in QUIVER_TABS else len(self.lists[tab])
             label = f"{TABS[tab][0]}  {shown}" + (f" / {totals[tab]}" if shown != totals[tab] else "")
             self.tabs.tab(table, text=label)
         new = sum(1 for c in r.missing + r.other_sites if r.is_new(c))
@@ -887,7 +902,7 @@ class App:
             return
         self.dirty.discard(tab)
         r = self.result
-        if tab == "quiver":
+        if tab in QUIVER_TABS:
             also: dict[str, list[str]] = {}
             for c in r.candidates:
                 for q in c.in_quiver:
@@ -895,13 +910,15 @@ class App:
                         if EXTERNAL[s] not in also.setdefault(q.key, []):
                             also[q.key].append(EXTERNAL[s])
             rows = []
-            for iid in self.quiver_shown:
+            for iid in (self.quiver_shown if tab == "quiver" else self.qdown_shown):
                 q = self.quiver_rows[iid]
                 link = r.links.get(q.key)
+                down = (link or {}).get("status") in TAKEN_DOWN_STATES
+                tags = ("flag",) if tab == "qdown" and (link or {}).get("replacements") else ("warn",) if down else ()
                 rows.append((iid, {**link_values(link), "title": q.title, "game": q.game, "released": q.released,
                                    "version": q.version,
                                    "added": q.added, "also_on": ", ".join(also.get(q.key, [])), "slug": q.slug,
-                                   "url": q.url}, ("warn",) if (link or {}).get("status") in TAKEN_DOWN_STATES else ()))
+                                   "url": q.url}, tags))
             self.tables[tab].fill(rows)
             return
         rows = []
@@ -930,15 +947,15 @@ class App:
 
     def selected_candidates(self) -> list[Candidate]:
         t = self.tables.get(self.current())
-        if not t or self.current() == "quiver":
+        if not t or self.current() in QUIVER_TABS:
             return []
         return [self.candidates[k] for k in t.selection() if k in self.candidates]
 
     def selected_links(self) -> list[tuple[str, list[str]]]:
         """(repository URL, listing pages) of each selected row."""
-        if self.current() == "quiver":
+        if self.current() in QUIVER_TABS:
             out = []
-            for iid in self.tables["quiver"].selection():
+            for iid in self.tables[self.current()].selection():
                 q = self.quiver_rows[iid]
                 c = self.candidates.get(q.key)
                 out.append((q.url, [q.page] + (list(c.pages.values()) if c else [])))
@@ -966,8 +983,8 @@ class App:
     def quiver_pages(self) -> list[tuple[str, str]]:
         """(title, Quiver page) for the selection: the Quiver app itself, the app with the same repository, or else
         Quiver's apps for the same game."""
-        if self.current() == "quiver":
-            apps = [self.quiver_rows[i] for i in self.tables["quiver"].selection() if i in self.quiver_rows]
+        if self.current() in QUIVER_TABS:
+            apps = [self.quiver_rows[i] for i in self.tables[self.current()].selection() if i in self.quiver_rows]
         else:
             apps = [q for c in self.selected_candidates() for q in (c.in_quiver or c.same_game)]
         seen, out = set(), []
@@ -1087,6 +1104,13 @@ class App:
         m.add_command(label="Copy URL", command=self.copy_urls)
         m.add_command(label="Check link now", command=self.check_selected_links,
                       state="disabled" if self.refreshing else "normal")
+        down_keys = self._selected_down_keys()
+        m.add_command(label="Find replacements now", command=self.find_selected_replacements,
+                      state="normal" if down_keys and not self.refreshing else "disabled")
+        link = self.result.links.get(down_keys[0]) if len(down_keys) == 1 else None
+        for r in ((link or {}).get("replacements") or [])[:6]:
+            m.add_command(label=f"Open replacement: {r['url'].split('://', 1)[-1]} ({r['how']})",
+                          command=lambda u=r["url"]: open_url(u))
         if cur in ("missing", "other", "taken", "waiting", "blacklist"):
             m.add_separator()
             if cur in ("missing", "other", "taken", "blacklist"):
@@ -1108,6 +1132,17 @@ class App:
                 for q in cands[0].same_game[:8]:
                     m.add_command(label=f"Quiver has the same game: {q.title}", command=lambda u=q.page or q.url: open_url(u))
         m.tk_popup(event.x_root, event.y_root)
+
+    def _selected_down_keys(self) -> list[str]:
+        keys = [self._key_of(u) for u, _ in self.selected_links()]
+        return [k for k in keys if (self.result.links.get(k) or {}).get("status") in TAKEN_DOWN_STATES]
+
+    def find_selected_replacements(self) -> None:
+        keys = self._selected_down_keys()
+        if keys and not self.refreshing:
+            self.log("--- Looking for replacements")
+            self._start("links", "Looking for replacements…", lambda say: {"checked": 0, "replacements":
+                        engine.find_replacements(self.store, keys, say)})
 
     def check_selected_links(self) -> None:
         keys = [url_key for url_key in (self._key_of(u) for u, _ in self.selected_links()) if url_key]
@@ -1143,8 +1178,8 @@ class App:
         d.delete("1.0", "end")
         cur = self.current()
         try:
-            if cur == "quiver":
-                sel = self.tables["quiver"].selection()
+            if cur in QUIVER_TABS:
+                sel = self.tables[cur].selection()
                 if len(sel) == 1:
                     self._quiver_details(self.quiver_rows[sel[0]])
                 elif sel:
@@ -1217,6 +1252,15 @@ class App:
             self._link(link["moved_to"], link["moved_to"])
         bits = [link.get("detail", ""), f"checked {link.get('checked', '')}", f"by {link['by']}" if link.get("by") else ""]
         d.insert("end", "   " + " · ".join(b for b in bits if b), "label")
+        if status in TAKEN_DOWN:
+            found = link.get("replacements") or []
+            self._line("Possible replacements")
+            if not found:
+                d.insert("end", "none found" + (f" ({link['replacements_checked']})" if link.get("replacements_checked")
+                                                else ", not looked for yet: right-click, Find replacements now"), "label")
+            for r in found[:6]:
+                self._link(r["url"].split("://", 1)[-1], r["url"])
+                d.insert("end", f" {r['how']}" + (f", {r['where']}" if r.get("where") else "") + "   ", "label")
 
     def _candidate_details(self, c: Candidate) -> None:
         d = self.details
@@ -1337,9 +1381,12 @@ class App:
                         return
                     self.reload()
                     if self.job == "links":
-                        down = len(self.result.taken_down)
-                        self.status.config(text=f"Links checked: {a.get('checked', 0)}. {down} listed project(s) "
-                                                f"taken down.", style="TLabel")
+                        down, qdown = len(self.result.taken_down), len(self.result.quiver_down)
+                        found = a.get("replacements", 0)
+                        text = (f"Links checked: {a.get('checked', 0)}. Taken down: {qdown} Quiver app(s), {down} listed "
+                                f"project(s)." + (f" Possible replacements for {found}." if found else ""))
+                        self.status.config(text=text, style="Error.TLabel" if qdown else "TLabel")
+                        self.log(text)
                         return
                     for e in a.get("errors", []):
                         self.log("ERROR " + e, error=True)
@@ -1372,8 +1419,8 @@ class App:
         if cur == "log":
             return
         self._fill(cur)
-        if cur == "quiver":
-            items = [self.quiver_rows[i] for i in self.tables["quiver"].tree.get_children()]
+        if cur in QUIVER_TABS:
+            items = [self.quiver_rows[i] for i in self.tables[cur].tree.get_children()]
             path = self._ask_path("quiver-catalog.csv")
             if path:
                 n = engine.write_quiver_csv(path, items, self.result.links)

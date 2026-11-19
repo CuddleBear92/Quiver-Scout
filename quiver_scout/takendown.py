@@ -47,7 +47,8 @@ class TakenDown:
         changed = 0
         for key, r in results.items():
             if r.get("status") in SHARED:
-                entry = {k: v for k, v in r.items() if k in ("status", "checked", "detail", "moved_to")}
+                entry = {k: v for k, v in r.items()
+                         if k in ("status", "checked", "detail", "moved_to", "replacements", "replacements_checked")}
                 entry["url"] = urls.get(key, "")
                 if by:
                     entry["by"] = by

@@ -166,7 +166,13 @@ def check_links(store: Store, progress: Progress = no_progress, keys: list[str] 
     found = linkcheck.check([(k, urls[k]) for k in todo], host_kinds(store, [i for i in items if i.source == "quiver"]),
                             store.tokens(), progress)
     mine = store.links()
-    entries = {k: linkcheck.merge(mine.get(k), r, today.isoformat()) for k, r in found.items()}
+    entries = {}
+    for k, r in found.items():
+        e = linkcheck.merge(mine.get(k), r, today.isoformat())
+        # A link still down keeps the replacements found for it.
+        if e["status"] in linkcheck.TAKEN_DOWN and (states.get(k) or {}).get("replacements_checked"):
+            e.update({x: states[k][x] for x in ("replacements", "replacements_checked") if x in states[k]})
+        entries[k] = e
     store.save_links(entries)
     shared = store.taken_down.update(entries, urls, by=store.settings.get("your_name", ""))
     counts: dict[str, int] = {}
@@ -175,7 +181,54 @@ def check_links(store: Store, progress: Progress = no_progress, keys: list[str] 
     down = sum(n for s, n in counts.items() if s in linkcheck.TAKEN_DOWN)
     progress(f"Link check: {len(entries)} of {len(todo)} checked, {down} taken down, {counts.get('moved', 0)} moved"
              + (f"; {shared} change(s) to the shared list" if shared else ""), 1, 1)
+
+    # Look for taken-down Quiver apps elsewhere every day, as developers may move their code; for other taken-down
+    # projects, only among what's already listed (no requests).
+    states = link_states(store)
+    quiver_keys = {i.key for i in items if i.source == "quiver"}
+    down = [k for k, e in states.items() if e.get("status") in linkcheck.TAKEN_DOWN]
+    ask = [k for k in down if k in quiver_keys and (states[k].get("replacements_checked", "") < today.isoformat())]
+    data_only = [k for k in entries if k in down and k not in quiver_keys]
+    if ask or data_only:
+        found_any = find_replacements(store, ask, progress) + find_replacements(store, data_only, progress, ask=False)
+        if found_any:
+            counts["replacements"] = found_any
     return {"checked": len(entries), **counts}
+
+
+def find_replacements(store: Store, keys: list[str], progress: Progress = no_progress, ask: bool = True) -> int:
+    """Look for each taken-down link's repository elsewhere (replacements.py) and keep what's found with its link
+    check, here and in the shared list. Returns how many links got at least one possible replacement."""
+    from datetime import date
+
+    from . import linkcheck, replacements
+
+    if not keys:
+        return 0
+    states = link_states(store)
+    known: dict[str, str] = {}
+    for i in store.items():
+        where = "in Quiver" if i["source"] == "quiver" else EXTERNAL.get(i["source"], i["source"])
+        known[i["key"]] = where if i["key"] not in known else (
+            known[i["key"]] if where in known[i["key"]] else f"{known[i['key']]}, {where}")
+    down = {k for k, e in states.items() if e.get("status") in linkcheck.TAKEN_DOWN}
+    tokens = store.tokens()
+    today = date.today().isoformat()
+    entries, hits = {}, 0
+    if ask:
+        progress(f"Looking for {len(keys)} taken-down repositories elsewhere", 0, len(keys))
+    for n, k in enumerate(keys, start=1):
+        found = replacements.find(k, known, down, tokens, ask=ask)
+        entries[k] = {**(states.get(k) or {}), "replacements": found, "replacements_checked": today}
+        hits += bool(found)
+        if ask:
+            progress(f"Replacements: {n}/{len(keys)}", n, len(keys))
+    store.save_links(entries)
+    urls = {k: known_url for k, known_url in ((i["key"], i["url"]) for i in store.items()) if k in entries}
+    store.taken_down.update(entries, urls, by=store.settings.get("your_name", ""))
+    if ask:
+        progress(f"Replacements: found possible ones for {hits} of {len(keys)}", 1, 1)
+    return hits
 
 
 @dataclass
@@ -251,6 +304,12 @@ class Comparison:
     def taken_down(self) -> list[Candidate]:
         """Not in Quiver, not decided on, and its link is taken down."""
         return [c for c in self.candidates if c.listed and not c.in_quiver and not c.decision and c.taken_down]
+
+    @property
+    def quiver_down(self) -> list[Item]:
+        """Quiver's own (live) apps whose repository is taken down."""
+        from .linkcheck import TAKEN_DOWN
+        return [q for q in self.quiver if (self.links.get(q.key) or {}).get("status") in TAKEN_DOWN]
 
     @property
     def missing(self) -> list[Candidate]:
