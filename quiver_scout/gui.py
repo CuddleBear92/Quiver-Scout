@@ -52,6 +52,9 @@ TABS = {
     "blacklist": ("Blacklist", ["title", "game", "note", "since", "by", "state", "url"]),
     "quiver": ("In Quiver", ["title", "game", "released", "version", "added", "also_on", "slug", "url"]),
 }
+# The Runs on filter's entry for projects no site says anything about.
+NOT_KNOWN = "Not known"
+
 # Progress messages that only count up, shown in the status line but not kept in the log.
 NOISY = re.compile(r"(pages|records) \d+/\d+|\(\d+\)$")
 
@@ -460,21 +463,27 @@ class App:
         self.sources_menu = tk.Menu(self.root, tearoff=False)
         for sid, label in EXTERNAL.items():
             v = tk.BooleanVar(value=True)
-            v.trace_add("write", lambda *_: (self._sources_label(), self.render()))
+            v.trace_add("write", lambda *_: self._filters_changed())
             self.source_vars[sid] = v
             self.sources_menu.add_checkbutton(label=label, variable=v)
         self.sources_menu.add_separator()
-        self.sources_menu.add_command(label="All sites", command=lambda: self._all_sources(True))
-        self.sources_menu.add_command(label="No sites", command=lambda: self._all_sources(False))
+        self.sources_menu.add_command(label="All sites", command=lambda: self._set_all(self.source_vars, True))
+        self.sources_menu.add_command(label="No sites", command=lambda: self._set_all(self.source_vars, False))
         self.sources_text = tk.StringVar()
         ttk.Menubutton(filters, textvariable=self.sources_text, menu=self.sources_menu, width=22).pack(side="left")
-        self._sources_label()
+        # What the projects run on: a drop-down like the sites', its entries from the data (see _systems_menu).
+        self.system_vars: dict[str, tk.BooleanVar] = {}
+        self.systems_menu = tk.Menu(self.root, tearoff=False)
+        self.systems_text = tk.StringVar()
+        ttk.Menubutton(filters, textvariable=self.systems_text, menu=self.systems_menu, width=22).pack(
+            side="left", padx=(6, 0))
+        self._batch = False
+        self._labels()
         ttk.Separator(filters, orient="vertical").pack(side="left", fill="y", padx=10)
         self.new_only = self._check(filters, "New")
         self.has_release = self._check(filters, "Has a release")
         self.hide_same_game = self._check(filters, "Hide games in Quiver")
         self.multi_only = self._check(filters, "2+ sites")
-        self.android_only = self._check(filters, "Android")
 
         # The bottom is packed before the lists so it keeps its size and the lists take what's left.
         bottom = ttk.Frame(self.root, padding=(10, 0, 10, 8))
@@ -510,19 +519,56 @@ class App:
         self.tabs.bind("<<NotebookTabChanged>>", lambda e: self._tab_changed())
         self._update_buttons()
 
-    def _sources_label(self) -> None:
-        on = [s for s, v in self.source_vars.items() if v.get()]
-        if len(on) == len(self.source_vars):
-            text = "Listed on: any site"
-        elif len(on) == 1:
-            text = f"Listed on: {EXTERNAL[on[0]]}"
-        else:
-            text = f"Listed on: {len(on)} of {len(self.source_vars)} sites"
-        self.sources_text.set(text)
+    @staticmethod
+    def _label(prefix: str, names: dict[str, str], variables: dict[str, tk.BooleanVar], what: str) -> str:
+        on = [k for k, v in variables.items() if v.get()]
+        if len(on) == len(variables):
+            return f"{prefix}: any {what[:-1] if what.endswith('s') else what}"
+        if len(on) == 1:
+            return f"{prefix}: {names.get(on[0], on[0])}"
+        return f"{prefix}: {len(on)} of {len(variables)} {what}"
 
-    def _all_sources(self, on: bool) -> None:
-        for v in self.source_vars.values():
-            v.set(on)
+    def _labels(self) -> None:
+        self.sources_text.set(self._label("Listed on", EXTERNAL, self.source_vars, "sites"))
+        self.systems_text.set(self._label("Runs on", {}, self.system_vars, "systems") if self.system_vars
+                              else "Runs on: any system")
+
+    def _filters_changed(self) -> None:
+        if not self._batch:
+            self._labels()
+            self.render()
+
+    def _set_all(self, variables: dict[str, tk.BooleanVar], on: bool) -> None:
+        """Tick or untick a whole drop-down, filtering the lists once rather than once per box."""
+        self._batch = True
+        try:
+            for v in variables.values():
+                v.set(on)
+        finally:
+            self._batch = False
+        self._filters_changed()
+
+    def _systems_menu(self) -> None:
+        """The Runs on entries: every system a project runs on, most common first, and Not known. A system that was
+        unticked stays unticked; one new since the last refresh starts ticked."""
+        counts: dict[str, int] = {}
+        for c in self.result.candidates if self.result else []:
+            for s in c.systems or [NOT_KNOWN]:
+                counts[s] = counts.get(s, 0) + 1
+        order = sorted((s for s in counts if s != NOT_KNOWN), key=lambda s: (-counts[s], s.lower()))
+        order += [NOT_KNOWN] if NOT_KNOWN in counts else []
+        old = {s: v.get() for s, v in self.system_vars.items()}
+        self.system_vars = {}
+        self.systems_menu.delete(0, "end")
+        for s in order:
+            v = tk.BooleanVar(value=old.get(s, True))
+            v.trace_add("write", lambda *_: self._filters_changed())
+            self.system_vars[s] = v
+            self.systems_menu.add_checkbutton(label=f"{s}  ({counts[s]})", variable=v)
+        self.systems_menu.add_separator()
+        self.systems_menu.add_command(label="All systems", command=lambda: self._set_all(self.system_vars, True))
+        self.systems_menu.add_command(label="No systems", command=lambda: self._set_all(self.system_vars, False))
+        self._labels()
 
     def _check(self, parent, text: str) -> tk.BooleanVar:
         v = tk.BooleanVar(value=False)
@@ -580,6 +626,7 @@ class App:
         for _, menu in self.menus:
             theme.style_menu(menu, c)
         theme.style_menu(self.sources_menu, c)
+        theme.style_menu(self.systems_menu, c)
         for t in self.tables.values():
             t.colors(c)
         for text in (self.details, self.logbox):
@@ -612,6 +659,7 @@ class App:
             self.refreshed.config(text=f"Last refresh {r['refreshed_at']}{prev}")
         if r.get("errors"):
             self.status.config(text="Last refresh had errors, see the Log tab", style="Error.TLabel")
+        self._systems_menu()
         self.render()
 
     def _search_soon(self) -> None:
@@ -626,6 +674,8 @@ class App:
         r = self.result
         text = self.search.get().strip().lower()
         sources = {s for s, v in self.source_vars.items() if v.get()}
+        systems = {s for s, v in self.system_vars.items() if v.get()}
+        every_system = len(systems) == len(self.system_vars)
         out = []
         for c in cands:
             if site_filters:
@@ -639,7 +689,7 @@ class App:
                     continue
                 if self.multi_only.get() and len(c.sources) < 2:
                     continue
-                if self.android_only.get() and not c.android:
+                if not every_system and not systems.intersection(c.systems or [NOT_KNOWN]):
                     continue
             d = c.decision or {}
             if text and not self._matches(text, c.title, c.game, c.url, c.author, c.platform, c.method,

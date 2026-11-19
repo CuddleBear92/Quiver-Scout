@@ -414,6 +414,9 @@ class Compare(unittest.TestCase):
         by = {c.title: c for c in engine.compare(self.store).missing}
         self.assertEqual(by["B"].runs_on, "PC, Android, Linux, Mac")
         self.assertEqual({t for t, c in by.items() if c.android}, {"B", "SM64 port"})
+        self.assertEqual(by["B"].systems, ["PC", "Android", "Linux", "Mac"])
+        self.assertEqual(by["SM64 port"].systems, ["Android"])  # from its name
+        self.assertEqual(by["PC only"].systems, [])
 
 
     def test_csv_exports(self):

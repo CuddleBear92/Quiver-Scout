@@ -87,9 +87,13 @@ Each tab's column order, hidden columns, widths and sorting are saved in `settin
 often a sign it's a fork; the details pane links to it.
 
 Filters: search (every word must match the project, game, URL, author, platform, method or note), *Listed on*
-(a drop-down of the sites), *New* (in the last refresh), *Has a release*, *Hide games in Quiver*, *2+ sites*, and
-*Android*: projects that run on Android, by any site's say (Decomp Buddy's builds, unbaked's and OSGL's platforms,
-RecompLauncher's systems), or that say Android in their name or link.
+(a drop-down of the sites), *Runs on* (a drop-down of the systems projects run on), *New* (in the last refresh),
+*Has a release*, *Hide games in Quiver* and *2+ sites*.
+
+*Runs on* lists every system any site says a project runs on or has builds for (Decomp Buddy's builds, unbaked's and
+OSGL's platforms, RecompLauncher's systems), most common first with a count, and *Not known* for projects no site
+says anything about. A project that says Android in its name or link counts as Android. To see one system, pick
+*No systems*, then tick it.
 
 The details pane, under the list when one project is selected and only as tall as what it says, shows what each
 site says about it: its page there, the release it knows of,
