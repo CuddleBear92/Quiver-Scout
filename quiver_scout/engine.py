@@ -354,6 +354,12 @@ class Candidate:
     version: str = ""
     pushed: str = ""  # newest push any site knows of
     runs_on: str = ""  # systems it has builds for or runs on (PC, Linux, Mac, Android...), from any site
+    # How popular it is, for sorting the big ones first: the highest any site gives.
+    stars: int = 0  # GitHub stars (RecompLauncher, Decomp Buddy, unbaked)
+    downloads: int = 0  # release downloads (RecompLauncher, Decomp Buddy)
+    players: int = 0  # PCs that played it through RecompLauncher in the last 90 days
+    score: int | None = None  # RecompLauncher's player-report score, 0-100
+    reports: int = 0  # how many player reports that score is from
     first_seen: str = ""
     sources: list[str] = field(default_factory=list)
     pages: dict[str, str] = field(default_factory=dict)
@@ -387,6 +393,11 @@ class Candidate:
     def android(self) -> bool:
         """Runs on Android, by any site's say, or says Android in its name or link."""
         return "Android" in self.runs_on.split(", ") or "android" in f"{self.title} {self.url} {self.game}".lower()
+
+    @property
+    def platforms(self) -> list[str]:
+        """The original platforms, for the Platform filter."""
+        return [p for p in self.platform.split(", ") if p]
 
     @property
     def systems(self) -> list[str]:
@@ -459,6 +470,13 @@ def _tidy(i: Item) -> Item:
     return i
 
 
+def _int(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def compare(store: Store) -> Comparison:
     clones = bool(store.settings.get("include_clones"))
     items = [_tidy(Item.from_dict(d)) for d in store.items()]
@@ -499,6 +517,12 @@ def compare(store: Store) -> Comparison:
             c.released, c.version = i.released, i.version
         if i.pushed and i.pushed > c.pushed:
             c.pushed = i.pushed
+        for stat in ("stars", "downloads", "players"):
+            value = _int(i.extra.get(stat))
+            if value > getattr(c, stat):
+                setattr(c, stat, value)
+        if _int(i.extra.get("reports")) > c.reports:
+            c.reports, c.score = _int(i.extra["reports"]), _int(i.extra.get("score"))
         runs = names.platform(", ".join(x for x in (i.extra.get("runs_on"), i.extra.get("builds")) if x))
         if runs:
             c.runs_on = names.platform(", ".join(x for x in (c.runs_on, runs) if x))
