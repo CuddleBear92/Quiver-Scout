@@ -57,6 +57,14 @@ class Urls(unittest.TestCase):
 
 
 class Sources(unittest.TestCase):
+    def test_recomplauncher_scores(self):
+        catalog = json.loads((FIX / "recomplauncher_pc.json").read_text())
+        scores = {"zelda64recomp": {"score": 99, "n": 98, "verdicts": {"runs": 97}}, "007eon-recomp": {"score": 0, "n": 0}}
+        by = {i.slug: i for i in recomplauncher.parse(catalog, scores)}
+        z = by["zelda64recomp"].extra
+        self.assertEqual((z["score"], z["reports"], z["stars"], z["downloads"]), (99, 98, 7738, 402541))
+        self.assertNotIn("score", by["007eon-recomp"].extra)  # no reports, no score
+
     def test_recomplauncher(self):
         items = recomplauncher.parse(json.loads((FIX / "recomplauncher_pc.json").read_text()))
         by = {i.slug: i for i in items}
@@ -750,6 +758,20 @@ class Compare(unittest.TestCase):
         with out.open() as f:
             rows = {r["title"]: r for r in csv.DictReader(f)}
         self.assertEqual(rows["A"]["reason"], BLACKLIST_REASONS["official"])
+
+
+    def test_popularity_numbers_and_platforms(self):
+        self.put([Item("recomplauncher", "https://github.com/a/b", "B", platform="ps2, Xbox",
+                       extra={"stars": 120, "downloads": 5000, "players": 80, "score": 91, "reports": 51}),
+                  Item("decompbuddy", "https://github.com/a/b", "B", extra={"stars": 125, "downloads": 4000}),
+                  Item("unbaked", "https://github.com/a/b", "B", extra={"stars": "bad"}),
+                  Item("playported", "https://github.com/c/d", "D")])
+        by = {c.title: c for c in engine.compare(self.store).missing}
+        b = by["B"]
+        self.assertEqual((b.stars, b.downloads, b.players, b.score, b.reports), (125, 5000, 80, 91, 51))
+        self.assertEqual(b.platforms, ["PlayStation 2", "Xbox"])
+        d = by["D"]
+        self.assertEqual((d.stars, d.downloads, d.players, d.score, d.reports, d.platforms), (0, 0, 0, None, 0, []))
 
 
     def test_csv_exports(self):

@@ -87,7 +87,19 @@ pip install .
 | **Down in Quiver** | Quiver's own live apps whose repository is taken down, to archive them or swap in a new host. Green rows have a possible replacement (see below). Apps you archive, or whose repository you change, leave it (see *Live check*). |
 | **Log** | What each refresh did, and any site that failed. |
 
-Columns include **Latest release**, **Version**, **Last push**, **Listed since**, **First seen** and **Runs on**.
+Columns include **Latest release**, **Version**, **Last push**, **Listed since**, **First seen** and **Runs on**,
+and how popular a project is, to sort the big ones first so none slip by:
+
+| Column | From |
+| --- | --- |
+| **Stars** | GitHub stars, as RecompLauncher, Decomp Buddy or unbaked give them (the highest) |
+| **Downloads** | release downloads, from RecompLauncher or Decomp Buddy |
+| **Played (90 days)** | PCs that played it through RecompLauncher in the last 90 days |
+| **Score**, **Reports** | RecompLauncher's player-report score (0–100) and how many reports it's from |
+
+PlayPorted, OSGameClones, Cloned Games and OSGL give no such numbers. Numbers sort biggest first on the first click.
+The RecompLauncher numbers come from its catalog file and its player-report scores (one more request, only
+downloaded again when it changed).
 
 - **Sort:** click a heading. A second click reverses, a third goes back to the list's own order (by game). Dates sort
   newest first, with unknown dates last either way.
@@ -105,7 +117,8 @@ common to tell apps apart (recomp, decomp, pc-port...) don't count. The details 
 Quiver* (hidden at first) is looser: Quiver has some app for the same game.
 
 Filters: search (every word must match the project, game, URL, author, platform, method or note), *Listed on*
-(a drop-down of the sites), *Runs on* (a drop-down of the systems projects run on), *New* (in the last refresh),
+(a drop-down of the sites), *Platform* (a drop-down of the original platforms: the console or computer the game
+came out on), *Runs on* (a drop-down of the systems projects run on), *New* (in the last refresh),
 *Has a release*, *Hide apps in Quiver* and *2+ sites*.
 
 *Runs on* lists every system any site says a project runs on or has builds for (Decomp Buddy's builds, unbaked's and

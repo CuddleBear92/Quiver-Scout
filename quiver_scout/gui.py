@@ -46,22 +46,27 @@ COL = {
     "link": ("Link", 120, ""),
     "replacement": ("Possible replacement", 280, ""),
     "checked": ("Link checked", 105, "date"),
+    "stars": ("Stars", 70, "num"),
+    "downloads": ("Downloads", 90, "num"),
+    "players": ("Played (90 days)", 130, "num"),
+    "score": ("Score", 60, "num"),
+    "reports": ("Reports", 70, "num"),
     "url": ("URL", 300, ""),
 }
 
 TABS = {
-    "missing": ("Missing", ["title", "game", "platform", "method", "sources", "released", "version", "pushed", "added",
+    "missing": ("Missing", ["title", "game", "platform", "method", "sources", "stars", "downloads", "players", "score", "reports", "released", "version", "pushed", "added",
                             "first_seen", "runs_on", "same_app", "same_game", "link", "checked", "url"]),
-    "other": ("Other sites", ["title", "game", "host", "sources", "released", "added", "first_seen", "runs_on", "link",
+    "other": ("Other sites", ["title", "game", "host", "sources", "stars", "downloads", "released", "added", "first_seen", "runs_on", "link",
                               "checked", "url"]),
-    "taken": ("Taken down", ["title", "game", "link", "checked", "replacement", "sources", "released", "pushed", "added",
+    "taken": ("Taken down", ["title", "game", "link", "checked", "replacement", "sources", "stars", "downloads", "players", "released", "pushed", "added",
                              "same_app", "same_game", "url"]),
-    "waiting": ("Waiting", ["title", "game", "reason", "note", "released", "version", "sources", "since", "by", "state",
+    "waiting": ("Waiting", ["title", "game", "reason", "note", "stars", "downloads", "players", "score", "reports", "released", "version", "sources", "since", "by", "state",
                             "runs_on", "link", "checked", "url"]),
     "blacklist": ("Blacklist", ["title", "game", "reason", "note", "since", "by", "state", "link", "checked", "url"]),
-    "quiver": ("In Quiver", ["title", "game", "released", "version", "added", "also_on", "link", "checked", "slug",
+    "quiver": ("In Quiver", ["title", "game", "stars", "downloads", "players", "score", "reports", "released", "version", "added", "also_on", "link", "checked", "slug",
                              "url"]),
-    "qdown": ("Down in Quiver", ["title", "game", "link", "checked", "replacement", "released", "version", "added", "slug",
+    "qdown": ("Down in Quiver", ["title", "game", "link", "checked", "replacement", "stars", "downloads", "players", "released", "version", "added", "slug",
                                  "url"]),
 }
 # The Runs on filter's entry for projects no site says anything about.
@@ -144,6 +149,13 @@ def set_icon(window: tk.Tk) -> None:
         window._icon = icon  # keep it alive  # noqa: SLF001
     except (tk.TclError, OSError):
         pass
+
+
+def stat_values(c: Candidate) -> dict:
+    """The popularity columns, with thousands separated; blank when no site gives the number."""
+    num = lambda n: f"{n:,}" if n else ""  # noqa: E731
+    return {"stars": num(c.stars), "downloads": num(c.downloads), "players": num(c.players),
+            "score": str(c.score) if c.reports and c.score is not None else "", "reports": num(c.reports)}
 
 
 def link_values(link: dict | None) -> dict:
@@ -385,7 +397,7 @@ class Table(ttk.Frame):
         if self._dragged:
             self._dragged = False
             return
-        first_desc = COL[col][2] == "date"  # dates start newest first: that's what's asked of them
+        first_desc = COL[col][2] in ("date", "num")  # newest and biggest first: that's what's asked of them
         if self.sort_col != col or not cycle:
             self.sort_col, self.sort_desc = col, first_desc
         elif self.sort_desc == first_desc:
@@ -406,7 +418,11 @@ class Table(ttk.Frame):
 
     def _sort(self) -> None:
         col = self.sort_col
-        rows = [(str(self.tree.set(i, col)).lower(), i) for i in self.tree.get_children("")]
+        if COL[col][2] == "num":  # "402,811" sorts as the number it is
+            rows = [((int(d) if (d := re.sub(r"[^0-9]", "", str(self.tree.set(i, col)))) else ""), i)
+                    for i in self.tree.get_children("")]
+        else:
+            rows = [(str(self.tree.set(i, col)).lower(), i) for i in self.tree.get_children("")]
         filled = sorted((r for r in rows if r[0]), reverse=self.sort_desc)
         empty = [r for r in rows if not r[0]]
         for n, (_, iid) in enumerate(filled + empty):
@@ -574,7 +590,7 @@ class App:
         ttk.Label(filters, text="Search").pack(side="left")
         self.search = tk.StringVar()
         self.search.trace_add("write", lambda *_: self._search_soon())
-        self.search_entry = ttk.Entry(filters, textvariable=self.search, width=28)
+        self.search_entry = ttk.Entry(filters, textvariable=self.search, width=22)
         self.search_entry.pack(side="left", padx=(6, 12))
         # Which sites: a drop-down of checkboxes, as there are more sites than fit in a row.
         self.source_vars = {}
@@ -588,12 +604,18 @@ class App:
         self.sources_menu.add_command(label="All sites", command=lambda: self._set_all(self.source_vars, True))
         self.sources_menu.add_command(label="No sites", command=lambda: self._set_all(self.source_vars, False))
         self.sources_text = tk.StringVar()
-        ttk.Menubutton(filters, textvariable=self.sources_text, menu=self.sources_menu, width=22).pack(side="left")
-        # What the projects run on: a drop-down like the sites', its entries from the data (see _systems_menu).
+        ttk.Menubutton(filters, textvariable=self.sources_text, menu=self.sources_menu, width=19).pack(side="left")
+        # The original platform, and what the projects run on: drop-downs like the sites', their entries from the
+        # data (see _value_menu).
+        self.platform_vars: dict[str, tk.BooleanVar] = {}
+        self.platforms_menu = tk.Menu(self.root, tearoff=False)
+        self.platforms_text = tk.StringVar()
+        ttk.Menubutton(filters, textvariable=self.platforms_text, menu=self.platforms_menu, width=19).pack(
+            side="left", padx=(6, 0))
         self.system_vars: dict[str, tk.BooleanVar] = {}
         self.systems_menu = tk.Menu(self.root, tearoff=False)
         self.systems_text = tk.StringVar()
-        ttk.Menubutton(filters, textvariable=self.systems_text, menu=self.systems_menu, width=22).pack(
+        ttk.Menubutton(filters, textvariable=self.systems_text, menu=self.systems_menu, width=19).pack(
             side="left", padx=(6, 0))
         self._batch = False
         self._labels()
@@ -701,7 +723,7 @@ class App:
     def _label(prefix: str, names: dict[str, str], variables: dict[str, tk.BooleanVar], what: str) -> str:
         on = [k for k, v in variables.items() if v.get()]
         if len(on) == len(variables):
-            return f"{prefix}: any {what[:-1] if what.endswith('s') else what}"
+            return f"{prefix}: any"
         if len(on) == 1:
             return f"{prefix}: {names.get(on[0], on[0])}"
         return f"{prefix}: {len(on)} of {len(variables)} {what}"
@@ -709,7 +731,9 @@ class App:
     def _labels(self) -> None:
         self.sources_text.set(self._label("Listed on", EXTERNAL, self.source_vars, "sites"))
         self.systems_text.set(self._label("Runs on", {}, self.system_vars, "systems") if self.system_vars
-                              else "Runs on: any system")
+                              else "Runs on: any")
+        self.platforms_text.set(self._label("Platform", {}, self.platform_vars, "platforms") if self.platform_vars
+                                else "Platform: any")
 
     def _filters_changed(self) -> None:
         if not self._batch:
@@ -727,26 +751,33 @@ class App:
         self._filters_changed()
 
     def _systems_menu(self) -> None:
-        """The Runs on entries: every system a project runs on, most common first, and Not known. A system that was
-        unticked stays unticked; one new since the last refresh starts ticked."""
+        """Fill the Platform and Runs on drop-downs from the data."""
+        self.platform_vars = self._value_menu(self.platforms_menu, self.platform_vars, lambda c: c.platforms, "platforms")
+        self.system_vars = self._value_menu(self.systems_menu, self.system_vars, lambda c: c.systems, "systems")
+        self._labels()
+
+    def _value_menu(self, menu: tk.Menu, old_vars: dict, values_of, what: str) -> dict:
+        """A drop-down of every value projects have (a platform, a system), most common first with a count, and Not
+        known for those with none. One that was unticked stays unticked; one new since the last refresh starts
+        ticked. Returns its variables."""
         counts: dict[str, int] = {}
         for c in self.result.candidates if self.result else []:
-            for s in c.systems or [NOT_KNOWN]:
+            for s in values_of(c) or [NOT_KNOWN]:
                 counts[s] = counts.get(s, 0) + 1
         order = sorted((s for s in counts if s != NOT_KNOWN), key=lambda s: (-counts[s], s.lower()))
         order += [NOT_KNOWN] if NOT_KNOWN in counts else []
-        old = {s: v.get() for s, v in self.system_vars.items()}
-        self.system_vars = {}
-        self.systems_menu.delete(0, "end")
+        old = {s: v.get() for s, v in old_vars.items()}
+        new: dict[str, tk.BooleanVar] = {}
+        menu.delete(0, "end")
         for s in order:
             v = tk.BooleanVar(value=old.get(s, True))
             v.trace_add("write", lambda *_: self._filters_changed())
-            self.system_vars[s] = v
-            self.systems_menu.add_checkbutton(label=f"{s}  ({counts[s]})", variable=v)
-        self.systems_menu.add_separator()
-        self.systems_menu.add_command(label="All systems", command=lambda: self._set_all(self.system_vars, True))
-        self.systems_menu.add_command(label="No systems", command=lambda: self._set_all(self.system_vars, False))
-        self._labels()
+            new[s] = v
+            menu.add_checkbutton(label=f"{s}  ({counts[s]})", variable=v)
+        menu.add_separator()
+        menu.add_command(label=f"All {what}", command=lambda: self._set_all(new, True))
+        menu.add_command(label=f"No {what}", command=lambda: self._set_all(new, False))
+        return new
 
     def _check(self, parent, text: str) -> tk.BooleanVar:
         v = tk.BooleanVar(value=False)
@@ -808,6 +839,7 @@ class App:
             theme.style_menu(menu, c)
         theme.style_menu(self.sources_menu, c)
         theme.style_menu(self.systems_menu, c)
+        theme.style_menu(self.platforms_menu, c)
         for t in self.tables.values():
             t.colors(c)
         for text in (self.details, self.logbox):
@@ -857,6 +889,8 @@ class App:
         sources = {s for s, v in self.source_vars.items() if v.get()}
         systems = {s for s, v in self.system_vars.items() if v.get()}
         every_system = len(systems) == len(self.system_vars)
+        platforms = {s for s, v in self.platform_vars.items() if v.get()}
+        every_platform = len(platforms) == len(self.platform_vars)
         out = []
         for c in cands:
             if site_filters:
@@ -871,6 +905,8 @@ class App:
                 if self.multi_only.get() and len(c.sources) < 2:
                     continue
                 if not every_system and not systems.intersection(c.systems or [NOT_KNOWN]):
+                    continue
+                if not every_platform and not platforms.intersection(c.platforms or [NOT_KNOWN]):
                     continue
             d = c.decision or {}
             if text and not self._matches(text, c.title, c.game, c.url, c.author, c.platform, c.method,
@@ -890,7 +926,7 @@ class App:
         return {
             "title": c.title, "game": c.game, "platform": c.platform, "method": c.method,
             "sources": ", ".join(EXTERNAL[s] for s in c.sources), "host": c.host, "released": c.released,
-            "version": c.version, "pushed": c.pushed, "added": c.added, "runs_on": c.runs_on,
+            "version": c.version, "pushed": c.pushed, "added": c.added, "runs_on": c.runs_on, **stat_values(c),
             "first_seen": "" if c.first_seen == "initial" else c.first_seen,
             "same_app": same_app_text(c),
             "same_game": f"yes ({len(c.same_game)})" if c.same_game else "",
@@ -953,7 +989,9 @@ class App:
                 link = r.links.get(q.key)
                 down = (link or {}).get("status") in TAKEN_DOWN_STATES
                 tags = ("flag",) if tab == "qdown" and (link or {}).get("replacements") else ("warn",) if down else ()
-                rows.append((iid, {**link_values(link), "title": q.title, "game": q.game, "released": q.released,
+                listed = self.candidates.get(q.key)  # what the listing sites say about it
+                rows.append((iid, {**link_values(link), **(stat_values(listed) if listed else {}),
+                                   "title": q.title, "game": q.game, "released": q.released,
                                    "version": q.version,
                                    "added": q.added, "also_on": ", ".join(also.get(q.key, [])), "slug": q.slug,
                                    "url": q.url}, tags))
@@ -1365,6 +1403,13 @@ class App:
                     f"last push {i.pushed}" if i.pushed else "", f"listed {i.added}" if i.added else ""]
             bits += [f"{k.replace('_', ' ')} {v}" for k, v in i.extra.items()
                      if k in ("builds", "stars", "status", "completeness", "ai", "state", "runs_on")]
+            x = i.extra
+            if x.get("downloads"):
+                bits.append(f"{int(x['downloads']):,} downloads")
+            if x.get("players"):
+                bits.append(f"played on {int(x['players']):,} PCs in 90 days")
+            if x.get("reports"):
+                bits.append(f"score {x.get('score')} from {int(x['reports']):,} reports")
             d.insert("end", " · ".join(b for b in bits if b))
             if i.source == "decompbuddy" and not i.extra.get("builds"):
                 d.insert("end", "   no builds published", "warn")
