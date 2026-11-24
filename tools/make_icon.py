@@ -2,7 +2,8 @@
 
     python tools/make_icon.py
 
-writes quiver_scout/assets/icon.png (256 px, for the window) and icon.ico (16 to 256 px, for the exe). Needs Pillow,
+writes quiver_scout/assets/icon.png (256 px, for the window), icon.ico (16 to 256 px, for the exe) and x.png (16 px,
+the Twitter/X tab's). Needs Pillow,
 which only this script does: the app itself doesn't.
 """
 
@@ -39,12 +40,25 @@ def draw() -> Image.Image:
     return img
 
 
+def draw_x_tab(size: int = 16) -> Image.Image:
+    """The Twitter/X tab's little icon: a plain X on a dark rounded square (not X's own logo)."""
+    big = 256
+    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((8, 8, big - 8, big - 8), radius=56, fill=(20, 20, 22, 255))
+    w = 30
+    d.line((68, 64, 188, 192), fill=(240, 240, 240, 255), width=w)
+    d.line((188, 64, 68, 192), fill=(240, 240, 240, 255), width=w)
+    return img.resize((size, size), Image.LANCZOS)
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     big = draw()
     big.resize((256, 256), Image.LANCZOS).save(OUT / "icon.png")
     big.save(OUT / "icon.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
-    print("wrote", OUT / "icon.png", "and", OUT / "icon.ico")
+    draw_x_tab().save(OUT / "x.png")
+    print("wrote", OUT / "icon.png", ",", OUT / "icon.ico", "and", OUT / "x.png")
 
 
 if __name__ == "__main__":

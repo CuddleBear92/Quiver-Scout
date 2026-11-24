@@ -18,6 +18,7 @@ Then you can open each one, wait for the ones that aren't ready, and blacklist t
 | **OSGameClones** | `osgameclones.com`, every project on one page: remakes, official source releases, and clones. | Downloaded only when it changed |
 | **Cloned Games** | `clonedgames.com/sitemap.xml`, then each project's page for its repository and original game (~4,200 pages, ~120 MB the first time). Its `/api/` is off limits by its robots.txt, so it isn't used. | Only new or changed pages |
 | **OSGL** (Trilarion) | `trilarion.github.io/opensourcegames`, the Open Source Games List: 27 letter pages with each game's repository and what inspired it. Remakes and clones only; original games are left out. | Each page downloaded only when it changed |
+| **Twitter/X** | The X accounts you follow (Twitter/X tab), read through [FxTwitter](https://fxtwitter.com)'s public API, no login: every link to a project in their posts. | Only posts newer than the last read; the whole history the first time |
 
 A refresh where nothing changed takes about ten seconds and downloads almost nothing: catalog files come back as
 "not modified", and page caches only fetch what the sitemaps say is new. **Full refresh** (Shift+F5) ignores
@@ -86,6 +87,7 @@ pip install .
 | **Linked** | Projects you marked as in Quiver by hand, and the Quiver app each one is: for when Quiver has it at an address no rule can tell (say, a launcher for the game's code). Red rows: that app has left Quiver. |
 | **In Quiver** | Quiver's catalog, each app's latest release, and which other sites also list it. |
 | **Down in Quiver** | Quiver's own live apps whose repository is taken down, to archive them or swap in a new host. Green rows have a possible replacement (see below). Apps you archive, or whose repository you change, leave it (see *Live check*). |
+| **Twitter/X** | The X accounts you follow, and their posts (see *Twitter/X accounts*). |
 | **Log** | What each refresh did, and any site that failed. |
 
 Columns include **Latest release**, **Version**, **Last push**, **Listed since**, **First seen** and **Runs on**,
@@ -169,6 +171,35 @@ everything look new or missing. The error is shown in the Log tab.
 
 The first refresh marks everything it finds as already known. After that, each project first found in a refresh
 gets that refresh's time in *First seen*, and *New* shows those from the newest one.
+
+## Twitter/X accounts
+
+Some X accounts post new recomps and ports as they come out (@TheEmporium83 is followed to begin with). Follow more on
+the **Twitter/X** tab: type `@name` or paste a link to the profile, and **Add**. Each account's row says:
+
+| Column | |
+| --- | --- |
+| Posts read, Posts on X | how much of its history has been read |
+| Last post, Since | its newest post, and how long ago |
+| Projects linked | projects its posts link to |
+| In Quiver, Missing, Waiting, Blacklisted | where those projects are in your lists |
+| Last read, Status | when it was read, and whether its whole history is in |
+
+Under them are the posts of the accounts selected (of all, when none is): the game, which list its project is in,
+the post, likes and views, the link. Right-click a post for the same actions as on Missing; right-click an account to
+open it on X, read its history again, or stop following it.
+
+Posted projects join every other list under **Twitter/X** in *Listed on*. The game is read from how these accounts
+write ("FIRE EMBLEM WARRIORS gets a native Windows and Linux recompilation"), and so is *Runs on*.
+
+**How it reads them, and why no login:** X shows timelines only to logged-in users, and its API costs money; Nitter
+instances mostly stopped working in 2024. FxTwitter's public API gives an account's posts 20 at a time, with older
+pages after them, no login. It answers "not now" when asked too often, so pages are asked 10 seconds apart and again
+after 20–90 seconds when it says so. The first refresh reads an account's whole history (150 posts took 2–8 minutes,
+as FxTwitter allowed), at most 50 pages (about 1,000 posts) a refresh, carrying on where it stopped the next time.
+After that a refresh reads only what's new: from the newest post back to the first one already read, usually one
+page. Reposts are kept, under the account that reposted them. If FxTwitter changes or goes away, the posts read so
+far stay.
 
 ## Checking links
 

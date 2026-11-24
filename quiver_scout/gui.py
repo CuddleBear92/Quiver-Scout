@@ -11,12 +11,14 @@ import threading
 import tkinter as tk
 import webbrowser
 from pathlib import Path
+from datetime import datetime, timezone
 from tkinter import filedialog, messagebox, ttk
 
 from . import engine, theme, updater
 from .decisions import BLACKLIST, BLACKLIST_REASONS, LINKED, WAIT_REASONS, WAITING, reason_label
 from .engine import Candidate, Comparison
 from .sources import EXTERNAL, Item
+from .sources import twitter as twitter_source
 from .linkcheck import TAKEN_DOWN as TAKEN_DOWN_STATES
 from .store import Store
 
@@ -52,8 +54,29 @@ COL = {
     "score": ("Score", 60, "num"),
     "reports": ("Reports", 70, "num"),
     "quiver_app": ("Quiver app", 240, ""),
+    "posted": ("Posted", 95, "date"),
+    "account": ("Account", 130, ""),
+    "post": ("Post", 430, ""),
+    "status": ("In the lists", 120, ""),
+    "likes": ("Likes", 60, "num"),
+    "views": ("Views", 70, "num"),
+    "acct": ("Account", 150, ""),
+    "acct_name": ("Name", 180, ""),
+    "posts_read": ("Posts read", 80, "num"),
+    "posts_x": ("Posts on X", 80, "num"),
+    "last_post": ("Last post", 125, "date"),
+    "ago": ("Since", 70, ""),
+    "projects": ("Projects linked", 105, "num"),
+    "in_quiver_n": ("In Quiver", 75, "num"),
+    "missing_n": ("Missing", 70, "num"),
+    "waiting_n": ("Waiting", 70, "num"),
+    "black_n": ("Blacklisted", 80, "num"),
+    "last_read": ("Last read", 125, "date"),
+    "acct_status": ("Status", 300, ""),
     "url": ("URL", 300, ""),
 }
+ACCOUNT_COLUMNS = ["acct", "acct_name", "posts_read", "posts_x", "last_post", "ago", "projects", "in_quiver_n",
+                   "missing_n", "waiting_n", "black_n", "last_read", "acct_status"]
 
 TABS = {
     "missing": ("Missing", ["title", "game", "platform", "method", "sources", "stars", "downloads", "players", "score", "reports", "released", "version", "pushed", "added",
@@ -68,6 +91,7 @@ TABS = {
     "linked": ("Linked", ["title", "game", "quiver_app", "note", "since", "by", "state", "link", "checked", "url"]),
     "quiver": ("In Quiver", ["title", "game", "stars", "downloads", "players", "score", "reports", "released", "version", "added", "also_on", "link", "checked", "slug",
                              "url"]),
+    "twitter": ("Twitter/X", ["posted", "account", "game", "status", "post", "likes", "views", "url"]),
     "qdown": ("Down in Quiver", ["title", "game", "link", "checked", "replacement", "stars", "downloads", "players", "released", "version", "added", "slug",
                                  "url"]),
 }
@@ -183,10 +207,10 @@ class Table(ttk.Frame):
     Column order, hidden columns, widths and sorting are kept per tab in settings.json.
     """
 
-    def __init__(self, master, app: "App", tab: str):
+    def __init__(self, master, app: "App", tab: str, columns: list[str] | None = None):
         super().__init__(master)
         self.app, self.tab = app, tab
-        self.columns = TABS[tab][1]
+        self.columns = columns or TABS[tab][1]
         self.tree = ttk.Treeview(self, columns=self.columns, show="headings", selectmode="extended")
         widths = self._saved("column_widths", {})
         for cid in self.columns:
@@ -211,7 +235,7 @@ class Table(ttk.Frame):
         self._headings()
         self.tree.bind("<<TreeviewSelect>>", lambda e: app.show_details())
         self.tree.bind("<Double-1>", self._double)
-        self.tree.bind("<Return>", lambda e: app.open_repo())
+        self.tree.bind("<Return>", lambda e: app.open_accounts() if tab == "xaccounts" else app.open_repo())
         self.tree.bind("<Button-3>", self._menu)
         self.tree.bind("<Button-2>", self._menu)
         self.tree.bind("<ButtonPress-1>", self._press, add="+")
@@ -342,7 +366,7 @@ class Table(ttk.Frame):
 
     def _double(self, event) -> None:
         if self.tree.identify_region(event.x, event.y) == "cell":
-            self.app.open_repo()
+            self.app.open_accounts() if self.tab == "xaccounts" else self.app.open_repo()
 
     def _menu(self, event) -> None:
         if self.tree.identify_region(event.x, event.y) in ("heading", "separator"):
@@ -725,13 +749,23 @@ class App:
 
         self.tabs = ttk.Notebook(self.root)
         self.tabs.pack(fill="both", expand=True, padx=10)
-        self.tables = {tab: Table(self.tabs, self, tab) for tab in TABS}
+        self.twitter_frame = ttk.Frame(self.tabs)
+        self.tables = {tab: Table(self.twitter_frame if tab == "twitter" else self.tabs, self, tab) for tab in TABS}
+        self._twitter_bar()
+        self.tab_widgets = {tab: (self.twitter_frame if tab == "twitter" else table) for tab, table in self.tables.items()}
         logframe = ttk.Frame(self.tabs)
         self.logbox = tk.Text(logframe, height=10, wrap="word", state="disabled", relief="flat", padx=8, pady=6,
                               highlightthickness=0, borderwidth=0)
         self.logbox.pack(fill="both", expand=True)
-        for tab, table in self.tables.items():
-            self.tabs.add(table, text=TABS[tab][0])
+        try:
+            self.x_icon = tk.PhotoImage(file=str(ASSETS / "x.png"))
+        except (tk.TclError, OSError):
+            self.x_icon = None
+        for tab, widget in self.tab_widgets.items():
+            if tab == "twitter" and self.x_icon:
+                self.tabs.add(widget, text=TABS[tab][0], image=self.x_icon, compound="left")
+            else:
+                self.tabs.add(widget, text=TABS[tab][0])
         self.tabs.add(logframe, text="Log")
         self.tabs.bind("<<NotebookTabChanged>>", lambda e: self._tab_changed())
         self._update_buttons()
@@ -793,6 +827,134 @@ class App:
             self._save_window()
         finally:
             self.root.destroy()
+
+    # ---- Twitter/X accounts --------------------------------------------------------------------------------------
+
+    def _twitter_bar(self) -> None:
+        """The Twitter/X tab: add an account; the accounts followed, with how they're doing; under them, the posts of
+        the ones selected (all of them when none is)."""
+        bar = ttk.Frame(self.twitter_frame, padding=(4, 6, 4, 6))
+        bar.pack(fill="x")
+        ttk.Label(bar, text="Follow an account").pack(side="left")
+        self.new_account = tk.StringVar()
+        entry = ttk.Entry(bar, textvariable=self.new_account, width=28)
+        entry.pack(side="left", padx=(6, 4))
+        entry.bind("<Return>", lambda e: self.add_account())
+        ttk.Button(bar, text="Add", command=self.add_account).pack(side="left")
+        ttk.Label(bar, text="@name or a link to the profile. Read through FxTwitter on refresh: the whole history the "
+                            "first time, then what's new.", style="Muted.TLabel").pack(side="left", padx=10)
+        self.accounts = Table(self.twitter_frame, self, "xaccounts", ACCOUNT_COLUMNS)
+        self.accounts.tree.configure(height=5)
+        self.accounts.pack(fill="x")
+        self.accounts.tree.bind("<<TreeviewSelect>>", lambda e: self._posts_for_selection(), add="+")
+        self.posts_label = ttk.Label(self.twitter_frame, text="Posts", style="Muted.TLabel", padding=(4, 8, 4, 2))
+        self.posts_label.pack(fill="x")
+        self.tables["twitter"].pack(fill="both", expand=True)
+
+    def _accounts(self) -> list[str]:
+        return list(self.store.settings.get("twitter_accounts", []))
+
+    def _selected_accounts(self) -> list[str]:
+        return [self.accounts.tree.set(i, "acct").lstrip("@") for i in self.accounts.selection()]
+
+    def _posts_for_selection(self) -> None:
+        self.dirty.add("twitter")
+        self.render_twitter()
+
+    @staticmethod
+    def _ago(stamp: str) -> str:
+        """"2026-11-24 22:55" -> "3 h", "2 d"..."""
+        try:
+            then = datetime.strptime(stamp[:16], "%Y-%m-%d %H:%M") if len(stamp) > 10 else datetime.strptime(stamp, "%Y-%m-%d")
+        except ValueError:
+            return ""
+        hours = (datetime.now(timezone.utc).replace(tzinfo=None) - then).total_seconds() / 3600
+        if hours < 1:
+            return f"{max(hours * 60, 0):.0f} min"
+        return f"{hours:.0f} h" if hours < 48 else f"{hours / 24:.0f} d"
+
+    def _fill_accounts(self) -> None:
+        """One row per account followed, with its stats."""
+        r = self.result
+        status = r.accounts if r else {}
+        by_account: dict[str, list[dict]] = {}
+        for p in (r.posts if r else []):
+            by_account.setdefault(p.get("account", "").lower(), []).append(p)
+        rows = []
+        for a in self._accounts():
+            st = status.get(a) or {}
+            posts = by_account.get(a.lower(), [])
+            keys = {self._key_of(link) for p in posts for link in p.get("links") or []} - {""}
+            lists = [self._list_of(self.candidates[k]) for k in keys if k in self.candidates]
+            if st.get("error") and st.get("tried", "") >= st.get("read", ""):
+                state, tags = f"FxTwitter didn't answer ({st['tried']}); will try again", ("warn",)
+            elif st.get("read"):
+                state = "whole history read" if st.get("complete") else "reading its history: more on the next refresh"
+                state += f" · {st.get('new', 0)} new last time"
+                tags = ()
+            else:
+                state, tags = "read on the next refresh", ("dim",)
+            last = st.get("last_post", "")
+            num = lambda n: f"{n:,}" if n else "0"  # noqa: E731
+            rows.append((a, {"acct": "@" + a, "acct_name": st.get("name", ""), "posts_read": num(len(posts)),
+                             "posts_x": num(st.get("posts_on_x", 0)) if st.get("posts_on_x") else "",
+                             "last_post": last, "ago": self._ago(last) if last else "", "projects": num(len(keys)),
+                             "in_quiver_n": num(lists.count("In Quiver")), "missing_n": num(lists.count("Missing")),
+                             "waiting_n": num(lists.count("Waiting")), "black_n": num(lists.count("Blacklisted")),
+                             "last_read": st.get("read", ""), "acct_status": state}, tags))
+        self.accounts.fill(rows)
+
+    def open_accounts(self) -> None:
+        for a in self._selected_accounts():
+            open_url(twitter_source.PROFILE.format(a))
+
+    def account_menu(self, event) -> None:
+        tree = self.accounts.tree
+        row = tree.identify_row(event.y)
+        if row and row not in tree.selection():
+            tree.selection_set(row)
+        names = self._selected_accounts()
+        m = tk.Menu(self.root, tearoff=False)
+        m.add_command(label="Open on X", command=self.open_accounts, state="normal" if names else "disabled")
+        m.add_command(label="Read its whole history again on the next refresh", command=lambda: self.reread(names),
+                      state="normal" if names else "disabled")
+        m.add_separator()
+        m.add_command(label="Stop following", command=lambda: [self.remove_account(a) for a in names],
+                      state="normal" if names else "disabled")
+        theme.style_menu(m, self.c)
+        m.tk_popup(event.x_root, event.y_root)
+
+    def reread(self, names: list[str]) -> None:
+        status = self.store.meta("twitter_status", {})
+        for a in names:
+            st = status.get(a) or {}
+            st.update({"complete": False, "history_cursor": None, "restart": True})
+            status[a] = st
+        self.store.set_meta("twitter_status", status)
+        self.status.config(text="Their history is read again on the next refresh (F5).", style="TLabel")
+
+    def add_account(self) -> None:
+        name = twitter_source.handle_of(self.new_account.get())
+        if not name:
+            messagebox.showwarning("Twitter/X", "That isn't an X account: give @name, or a link to the profile.",
+                                   parent=self.root)
+            return
+        accounts = self._accounts()
+        if name.lower() not in (a.lower() for a in accounts):
+            accounts.append(name)
+            self.store.settings["twitter_accounts"] = accounts
+            self.store.save_settings()
+        self.new_account.set("")
+        self.reload()
+        self.status.config(text=f"Following @{name}: its posts are read on the next refresh (F5).", style="TLabel")
+
+    def remove_account(self, name: str) -> None:
+        if not messagebox.askyesno("Twitter/X", f"Stop following @{name}? Its posts leave the list on the next "
+                                   "refresh.", parent=self.root):
+            return
+        self.store.settings["twitter_accounts"] = [a for a in self._accounts() if a.lower() != name.lower()]
+        self.store.save_settings()
+        self.reload()
 
     @staticmethod
     def _label(prefix: str, names: dict[str, str], variables: dict[str, tk.BooleanVar], what: str) -> str:
@@ -1037,14 +1199,21 @@ class App:
                              if not text or self._matches(text, q.title, q.game, q.url, q.slug, q.author)]
         down = {q.key for q in r.quiver_down}
         self.qdown_shown = [iid for iid in self.quiver_shown if self.quiver_rows[iid].key in down]
+        # Twitter/X: a row per project link in a post, or one for a post with none.
+        self.twitter_rows = {}
+        for p in r.posts:
+            for n, link in enumerate(p.get("links") or [""]):
+                self.twitter_rows[f"{p.get('id')}#{n}"] = (p, link)
+        self.twitter_shown = self._twitter_shown(text)
         totals = {"missing": len(r.missing), "other": len(r.other_sites), "taken": len(r.taken_down),
                   "waiting": len(r.decided(WAITING)),
-                  "blacklist": len(r.decided(BLACKLIST)), "linked": len(r.decided(LINKED)), "quiver": len(r.quiver), "qdown": len(r.quiver_down)}
+                  "blacklist": len(r.decided(BLACKLIST)), "linked": len(r.decided(LINKED)), "quiver": len(r.quiver), "qdown": len(r.quiver_down),
+                  "twitter": len(self.twitter_rows)}
         for tab, table in self.tables.items():
             shown = {"quiver": len(self.quiver_shown), "qdown": len(self.qdown_shown)}.get(tab) \
-                if tab in QUIVER_TABS else len(self.lists[tab])
+                if tab in QUIVER_TABS else len(self.twitter_shown) if tab == "twitter" else len(self.lists[tab])
             label = f"{TABS[tab][0]}  {shown}" + (f" / {totals[tab]}" if shown != totals[tab] else "")
-            self.tabs.tab(table, text=label)
+            self.tabs.tab(self.tab_widgets[tab], text=label)
         new = sum(1 for c in r.missing + r.other_sites if r.is_new(c))
         self.count.config(text=f"{sum(1 for c in r.candidates if c.listed)} listed elsewhere · "
                                f"{len(r.missing)} missing · {new} new")
@@ -1057,6 +1226,10 @@ class App:
             return
         self.dirty.discard(tab)
         r = self.result
+        if tab == "twitter":
+            self._fill_accounts()
+            self._fill_posts()
+            return
         if tab in QUIVER_TABS:
             also: dict[str, list[str]] = {}
             for c in r.candidates:
@@ -1092,6 +1265,39 @@ class App:
             rows.append((c.key, self._values(c), tags))
         self.tables[tab].fill(rows)
 
+    def _twitter_shown(self, text: str) -> list[str]:
+        """Post rows matching the search, of the accounts selected (all of them when none is)."""
+        picked = {a.lower() for a in self._selected_accounts()} if hasattr(self, "accounts") else set()
+        return [iid for iid, (p, link) in self.twitter_rows.items()
+                if (not picked or p.get("account", "").lower() in picked)
+                and (not text or self._matches(text, p.get("text", ""), p.get("game", ""), p.get("account", ""), link))]
+
+    def render_twitter(self) -> None:
+        """Just the posts, for another selection of accounts."""
+        if not self.result:
+            return
+        self.twitter_shown = self._twitter_shown(self.search.get().strip().lower())
+        self._fill_posts()
+
+    def _fill_posts(self) -> None:
+        picked = self._selected_accounts()
+        self.posts_label.configure(text=f"Posts of {', '.join('@' + a for a in picked)}" if picked
+                                   else "Posts of every account (select accounts above to see theirs)")
+        rows = []
+        for iid in self.twitter_shown:
+            p, link = self.twitter_rows[iid]
+            c = self.candidates.get(self._key_of(link)) if link else None
+            status = self._list_of(c) if c else ("no project link" if not link else "")
+            tags = ("new",) if status == "Missing" else ("dim",) if not link else ()
+            who = "@" + p.get("account", "")
+            if p.get("author") and p["author"].lower() != p.get("account", "").lower():
+                who += f" ↻ @{p['author']}"  # a repost
+            rows.append((iid, {"posted": p.get("date", ""), "account": who,
+                               "game": p.get("game", ""), "status": status, "post": p.get("text", ""),
+                               "likes": f"{p['likes']:,}" if p.get("likes") else "",
+                               "views": f"{p['views']:,}" if p.get("views") else "", "url": link}, tags))
+        self.tables["twitter"].fill(rows)
+
     def _tab_changed(self) -> None:
         if self.result and self.current() in TABS:
             self._fill(self.current())
@@ -1104,7 +1310,28 @@ class App:
         i = self.tabs.index(self.tabs.select())
         return list(TABS)[i] if i < len(TABS) else "log"
 
+    def _list_of(self, c: Candidate) -> str:
+        """Which list a project is in, for the Twitter/X tab."""
+        d = (c.decision or {}).get("list")
+        if d == WAITING:
+            return "Waiting"
+        if d == BLACKLIST:
+            return "Blacklisted"
+        if d == LINKED or c.in_quiver:
+            return "In Quiver"
+        if c.taken_down:
+            return "Taken down"
+        return "Missing" if c.supported_host else "Other sites"
+
     def selected_candidates(self) -> list[Candidate]:
+        if self.current() == "twitter":
+            out = []
+            for iid in self.tables["twitter"].selection():
+                link = self.twitter_rows.get(iid, ({}, ""))[1]
+                c = self.candidates.get(self._key_of(link)) if link else None
+                if c and c not in out:
+                    out.append(c)
+            return out
         t = self.tables.get(self.current())
         if not t or self.current() in QUIVER_TABS:
             return []
@@ -1112,6 +1339,13 @@ class App:
 
     def selected_links(self) -> list[tuple[str, list[str]]]:
         """(repository URL, listing pages) of each selected row."""
+        if self.current() == "twitter":
+            out = []
+            for iid in self.tables["twitter"].selection():
+                p, link = self.twitter_rows.get(iid, ({}, ""))
+                c = self.candidates.get(self._key_of(link)) if link else None
+                out.append((link or p.get("url", ""), [p.get("url", "")] + (list(c.pages.values()) if c else [])))
+            return out
         if self.current() in QUIVER_TABS:
             out = []
             for iid in self.tables[self.current()].selection():
@@ -1126,9 +1360,9 @@ class App:
         on = lambda yes: "normal" if yes else "disabled"  # noqa: E731
         for b in (self.btn_open, self.btn_pages, self.btn_copy):
             b.config(state=on(cur != "log"))
-        self.btn_wait.config(state=on(cur in ("missing", "other", "taken", "waiting", "blacklist")),
+        self.btn_wait.config(state=on(cur in ("missing", "twitter", "other", "taken", "waiting", "blacklist")),
                              text="Change why…  W" if cur == "waiting" else "Wait…  W")
-        self.btn_black.config(state=on(cur in ("missing", "other", "taken", "waiting", "blacklist")),
+        self.btn_black.config(state=on(cur in ("missing", "twitter", "other", "taken", "waiting", "blacklist")),
                               text="Change reason…" if cur == "blacklist" else "Blacklist…  Del")
         self.btn_back.config(state=on(cur in ("waiting", "blacklist", "linked")))
         self.btn_quiver.config(state=on(bool(self.quiver_pages())))
@@ -1212,7 +1446,7 @@ class App:
         return (cands[0].title or cands[0].url) if len(cands) == 1 else f"{len(cands)} projects"
 
     def wait_selected(self) -> None:
-        if self.current() not in ("missing", "other", "taken", "waiting", "blacklist"):
+        if self.current() not in ("missing", "twitter", "other", "taken", "waiting", "blacklist"):
             return
         cands = self.selected_candidates()
         if not cands:
@@ -1230,7 +1464,7 @@ class App:
 
     def blacklist_selected(self) -> None:
         """Blacklist the selection, with a reason; on the Blacklist tab, change the reason."""
-        if self.current() not in ("missing", "other", "taken", "waiting", "blacklist"):
+        if self.current() not in ("missing", "twitter", "other", "taken", "waiting", "blacklist"):
             return
         cands = self.selected_candidates()
         if not cands:
@@ -1264,6 +1498,9 @@ class App:
         self._after_decision([c.key for c in cands], f"{self._describe(cands)} back in the list")
 
     def context_menu(self, event) -> None:
+        if event.widget is self.accounts.tree:
+            self.account_menu(event)
+            return
         tree = event.widget
         row = tree.identify_row(event.y)
         if row and row not in tree.selection():
@@ -1290,11 +1527,11 @@ class App:
         for r in ((link or {}).get("replacements") or [])[:6]:
             m.add_command(label=f"Open replacement: {r['url'].split('://', 1)[-1]} ({r['how']})",
                           command=lambda u=r["url"]: open_url(u))
-        if cur in ("missing", "other", "taken", "waiting", "blacklist", "linked"):
+        if cur in ("missing", "twitter", "other", "taken", "waiting", "blacklist", "linked"):
             m.add_separator()
             self._link_menu(m, cur)
-        if cur in ("missing", "other", "taken", "waiting", "blacklist"):
-            if cur in ("missing", "other", "taken", "blacklist"):
+        if cur in ("missing", "twitter", "other", "taken", "waiting", "blacklist"):
+            if cur in ("missing", "twitter", "other", "taken", "blacklist"):
                 wait = tk.Menu(m, tearoff=False)
                 for rid, label in WAIT_REASONS.items():
                     wait.add_command(label=label, command=lambda r=rid: self._quick_wait(r))
@@ -1341,7 +1578,7 @@ class App:
 
     def link_selected(self) -> None:
         """Pick the Quiver app the selected projects are, from a searchable list."""
-        if self.current() not in ("missing", "other", "taken", "waiting", "blacklist", "linked"):
+        if self.current() not in ("missing", "twitter", "other", "taken", "waiting", "blacklist", "linked"):
             return
         cands = self.selected_candidates()
         if not cands or not self.result:
