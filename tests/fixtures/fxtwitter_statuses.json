@@ -1,0 +1,374 @@
+{
+ "code": 200,
+ "results": [
+  {
+   "type": "status",
+   "url": "https://x.com/TheEmporium83/status/2125362695352553882",
+   "id": "2125362695352553882",
+   "text": "\u2694\ufe0f YAKUZA: KENZAN! gets a native Windows and Linux recompilation with English translation, 4K resolution and 120 FPS! \ud83d\udd25\n\nDeveloper IvanBarbosaFilho has released v1.0.0 Beta of Ryu ga Gotoku Kenzan!, bringing the 2008 Japan-exclusive PlayStation 3 adventure to modern PCs using ps3recomp!\n\n\ud83d\udd25 FEATURES:\n\n\u2705 NATIVE WINDOWS & LINUX \u2014 Original PS3 PPU and SPU code recompiled into native PC code!\n\n\u2705 ENGLISH TRANSLATION \u2014 Community translation automatically applied during installation!\n\n\u2705 120 FPS SUPPORT \u2014 Selectable 30, 60 and 120 FPS modes without increasing gameplay speed!\n\n\u2705 ENHANCED GRAPHICS \u2014 Vulkan rendering, up to 4K resolution, SMAA, FXAA, MSAA, sharpening and anisotropic filtering!\n\n\u2705 MINIGAME SUPPORT \u2014 Including mahjong, shogi, bowling, archery, turtle racing and more!\n\n\u2705 MODERN CONTROLS \u2014 Remappable keyboard and mouse inputs, controller support, in-game settings and compatibility with original PS3 and RPCS3 saves!\n\n\u26a0\ufe0f BETA RELEASE \u2014 The entire game is reportedly playable, but testing across different hardware remains limited.\n\n\ud83d\udcbf Requires your own decrypted Japanese PS3 game (BLJM60064 v1.00), the community English translation patch and approximately 25 GB of free storage.\n\nA dedicated launcher handles installation without requiring manual compilation.\n\n\ud83d\udee0\ufe0f Developed by IvanBarbosaFilho using ps3recomp and the inFAMOUS 2 PC port runtime.\n\n\ud83c\udf0d Credit to majDima, Arcodeaus, jurxd, PauseForTheCat and TheEdgyNerd for the English translation, and Pakundo for the frame-rate patches.\n\n\u2b50 Support the project with a GitHub star!\n\n\ud83d\udce6 DOWNLOAD:\n\n\ud83d\udd17https://github.com/IvanBarbosaFilho/Yakuza-Kenzan-Recomp/releases\n\n\ud83d\udcbb SOURCE CODE:\n\n\ud83d\udd17https://github.com/IvanBarbosaFilho/Yakuza-Kenzan-Recomp\n\n\ud83c\udf10 Discover more PC ports, recompilations and fan projects:\n\n\ud83d\udd17https://thegamingemporium.com\n\n#Yakuza #StaticRecompilation #GamePreservation",
+   "raw_text": {
+    "text": "\u2694\ufe0f YAKUZA: KENZAN! gets a native Windows and Linux recompilation with English translation, 4K resolution and 120 FPS! \ud83d\udd25\n\nDeveloper IvanBarbosaFilho has released v1.0.0 Beta of Ryu ga Gotoku Kenzan!, bringing the 2008 Japan-exclusive PlayStation 3 adventure to modern PCs using ps3recomp!\n\n\ud83d\udd25 FEATURES:\n\n\u2705 NATIVE WINDOWS & LINUX \u2014 Original PS3 PPU and SPU code recompiled into native PC code!\n\n\u2705 ENGLISH TRANSLATION \u2014 Community translation automatically applied during installation!\n\n\u2705 120 FPS SUPPORT \u2014 Selectable 30, 60 and 120 FPS modes without increasing gameplay speed!\n\n\u2705 ENHANCED GRAPHICS \u2014 Vulkan rendering, up to 4K resolution, SMAA, FXAA, MSAA, sharpening and anisotropic filtering!\n\n\u2705 MINIGAME SUPPORT \u2014 Including mahjong, shogi, bowling, archery, turtle racing and more!\n\n\u2705 MODERN CONTROLS \u2014 Remappable keyboard and mouse inputs, controller support, in-game settings and compatibility with original PS3 and RPCS3 saves!\n\n\u26a0\ufe0f BETA RELEASE \u2014 The entire game is reportedly playable, but testing across different hardware remains limited.\n\n\ud83d\udcbf Requires your own decrypted Japanese PS3 game (BLJM60064 v1.00), the community English translation patch and approximately 25 GB of free storage.\n\nA dedicated launcher handles installation without requiring manual compilation.\n\n\ud83d\udee0\ufe0f Developed by IvanBarbosaFilho using ps3recomp and the inFAMOUS 2 PC port runtime.\n\n\ud83c\udf0d Credit to majDima, Arcodeaus, jurxd, PauseForTheCat and TheEdgyNerd for the English translation, and Pakundo for the frame-rate patches.\n\n\u2b50 Support the project with a GitHub star!\n\n\ud83d\udce6 DOWNLOAD:\n\n\ud83d\udd17https://t.co/ZN3wP2WLsI\n\n\ud83d\udcbb SOURCE CODE:\n\n\ud83d\udd17https://t.co/lVi6g2yUQN\n\n\ud83c\udf10 Discover more PC ports, recompilations and fan projects:\n\n\ud83d\udd17https://t.co/4gt4Wwi8lx\n\n#Yakuza #StaticRecompilation #GamePreservation",
+    "display_text_range": [
+     0,
+     1768
+    ],
+    "facets": [
+     {
+      "type": "url",
+      "indices": [
+       1558,
+       1581
+      ],
+      "original": "https://t.co/ZN3wP2WLsI",
+      "replacement": "https://github.com/IvanBarbosaFilho/Yakuza-Kenzan-Recomp/releases",
+      "display": "github.com/IvanBarbosaFil\u2026"
+     },
+     {
+      "type": "url",
+      "indices": [
+       1600,
+       1623
+      ],
+      "original": "https://t.co/lVi6g2yUQN",
+      "replacement": "https://github.com/IvanBarbosaFilho/Yakuza-Kenzan-Recomp",
+      "display": "github.com/IvanBarbosaFil\u2026"
+     },
+     {
+      "type": "url",
+      "indices": [
+       1686,
+       1709
+      ],
+      "original": "https://t.co/4gt4Wwi8lx",
+      "replacement": "https://thegamingemporium.com",
+      "display": "thegamingemporium.com"
+     },
+     {
+      "type": "hashtag",
+      "indices": [
+       1711,
+       1718
+      ],
+      "original": "Yakuza"
+     },
+     {
+      "type": "hashtag",
+      "indices": [
+       1719,
+       1739
+      ],
+      "original": "StaticRecompilation"
+     },
+     {
+      "type": "hashtag",
+      "indices": [
+       1740,
+       1757
+      ],
+      "original": "GamePreservation"
+     }
+    ]
+   },
+   "author": {
+    "screen_name": "TheEmporium83",
+    "url": "https://x.com/TheEmporium83",
+    "id": "2124111069345910784",
+    "followers": 410,
+    "following": 182,
+    "likes": 101,
+    "media_count": 27,
+    "statuses": 163,
+    "name": "The Gaming Emporium",
+    "description": "Curator of The Gaming Emporium website. A centralised site for Decompilations, Recompilations, PC Ports, Android Ports and more videogaming goodness.",
+    "raw_description": {
+     "text": "Curator of The Gaming Emporium website. A centralised site for Decompilations, Recompilations, PC Ports, Android Ports and more videogaming goodness.",
+     "facets": []
+    },
+    "location": "Ireland",
+    "banner_url": "",
+    "avatar_url": "https://pbs.twimg.com/profile_images/2124111632401854464/50zQ7cWv_200x200.jpg",
+    "joined": "Sat Nov 21 12:03:57 +0000 2026",
+    "protected": false,
+    "website": {
+     "url": "https://thegamingemporium.com/",
+     "display_url": "thegamingemporium.com"
+    },
+    "verification": {
+     "verified": true,
+     "verified_at": null,
+     "type": "individual"
+    },
+    "type": "profile"
+   },
+   "replies": 0,
+   "reposts": 1,
+   "likes": 1,
+   "bookmarks": 0,
+   "quotes": 0,
+   "embed_card": "tweet",
+   "created_at": "Tue Nov 24 22:55:28 +0000 2026",
+   "created_timestamp": 1795560928,
+   "views": 12,
+   "is_note_tweet": true,
+   "community_note": null,
+   "lang": "en",
+   "replying_to": null,
+   "media": {},
+   "card": {
+    "url": "https://github.com/IvanBarbosaFilho/Yakuza-Kenzan-Recomp/releases",
+    "title": "Releases \u00b7 IvanBarbosaFilho/Yakuza-Kenzan-Recomp",
+    "description": "Contribute to IvanBarbosaFilho/Yakuza-Kenzan-Recomp development by creating an account on GitHub.",
+    "domain": "github.com",
+    "image": {
+     "width": 800,
+     "height": 419,
+     "url": "https://pbs.twimg.com/card_img/2125362697789386753/EL9cPbu7?format=jpg&name=800x419"
+    }
+   },
+   "provider": "twitter",
+   "reposted_by": null
+  },
+  {
+   "type": "status",
+   "url": "https://x.com/TheEmporium83/status/2125361725193003484",
+   "id": "2125361725193003484",
+   "text": "\u2694\ufe0f FIRE EMBLEM WARRIORS gets a native Windows and Linux recompilation with dedicated Steam Deck optimisations! \ud83d\udd25\n\nDeveloper Azzulin has released FEW Recomp v0.2.0, bringing the 2017 Nintendo Switch adventure to PC using the HWDER recompilation runtime!\n\n\ud83d\udd25 FEATURES:\n\n\u2705 STATIC RECOMPILATION \u2014 Original ARM64 game code converted into a native x86-64 program with Vulkan rendering!\n\n\u2705 NATIVE STEAM DECK SUPPORT \u2014 No Proton or separate Windows PC required!\n\n\u2705 60 FPS SUPPORT \u2014 Windows battles at 720p or optional 1080p, with selectable 30 FPS and 60 FPS modes!\n\n\u2705 DLC SUPPORT \u2014 All five DLC packages supported using your original game files!\n\n\u2705 HANDHELD OPTIMISATIONS \u2014 Dedicated Zen 2 compilation, improved GPU efficiency and original particle effects preserved!\n\n\u2705 AUTOMATED BUILD SYSTEM \u2014 Automatic toolchain downloads, resumable compilation, background shader caching and Steam shortcut creation!\n\n\u26a0\ufe0f EARLY RELEASE \u2014 Demanding battles can still dip below 30 FPS on Steam Deck. Ultrawide, increased resolution scaling and 120 FPS enhancements are not currently available.\n\n\ud83d\udcf1 Android support is a future ambition, but development has not yet started.\n\n\ud83d\udcbf Requires your own US copy of Fire Emblem Warriors, update 1.5.0 and console keys. The source-only release includes automated scripts to compile the game locally.\n\n\ud83d\udee0\ufe0f Developed by Azzulin using the HWDER v0.3.5 runtime.\n\n\u2b50 Support the project with a GitHub star!\n\n\ud83d\udce6 DOWNLOAD v0.2.0:\n\n\ud83d\udd17https://github.com/Azzulin/FEW-Recomp/releases/tag/v0.2.0\n\n\ud83d\udcbb SOURCE CODE:\n\n\ud83d\udd17https://github.com/Azzulin/FEW-Recomp\n\n\ud83c\udf10 Discover more PC ports, recompilations and fan projects:\n\n\ud83d\udd17https://thegamingemporium.com\n\n#StaticRecompilation #GamePreservation",
+   "raw_text": {
+    "text": "\u2694\ufe0f FIRE EMBLEM WARRIORS gets a native Windows and Linux recompilation with dedicated Steam Deck optimisations! \ud83d\udd25\n\nDeveloper Azzulin has released FEW Recomp v0.2.0, bringing the 2017 Nintendo Switch adventure to PC using the HWDER recompilation runtime!\n\n\ud83d\udd25 FEATURES:\n\n\u2705 STATIC RECOMPILATION \u2014 Original ARM64 game code converted into a native x86-64 program with Vulkan rendering!\n\n\u2705 NATIVE STEAM DECK SUPPORT \u2014 No Proton or separate Windows PC required!\n\n\u2705 60 FPS SUPPORT \u2014 Windows battles at 720p or optional 1080p, with selectable 30 FPS and 60 FPS modes!\n\n\u2705 DLC SUPPORT \u2014 All five DLC packages supported using your original game files!\n\n\u2705 HANDHELD OPTIMISATIONS \u2014 Dedicated Zen 2 compilation, improved GPU efficiency and original particle effects preserved!\n\n\u2705 AUTOMATED BUILD SYSTEM \u2014 Automatic toolchain downloads, resumable compilation, background shader caching and Steam shortcut creation!\n\n\u26a0\ufe0f EARLY RELEASE \u2014 Demanding battles can still dip below 30 FPS on Steam Deck. Ultrawide, increased resolution scaling and 120 FPS enhancements are not currently available.\n\n\ud83d\udcf1 Android support is a future ambition, but development has not yet started.\n\n\ud83d\udcbf Requires your own US copy of Fire Emblem Warriors, update 1.5.0 and console keys. The source-only release includes automated scripts to compile the game locally.\n\n\ud83d\udee0\ufe0f Developed by Azzulin using the HWDER v0.3.5 runtime.\n\n\u2b50 Support the project with a GitHub star!\n\n\ud83d\udce6 DOWNLOAD v0.2.0:\n\n\ud83d\udd17https://t.co/darBwRV19M\n\n\ud83d\udcbb SOURCE CODE:\n\n\ud83d\udd17https://t.co/w2qVHpTpWn\n\n\ud83c\udf10 Discover more PC ports, recompilations and fan projects:\n\n\ud83d\udd17https://t.co/4gt4WwhAvZ\n\n#StaticRecompilation #GamePreservation",
+    "display_text_range": [
+     0,
+     1638
+    ],
+    "facets": [
+     {
+      "type": "url",
+      "indices": [
+       1436,
+       1459
+      ],
+      "original": "https://t.co/darBwRV19M",
+      "replacement": "https://github.com/Azzulin/FEW-Recomp/releases/tag/v0.2.0",
+      "display": "github.com/Azzulin/FEW-Re\u2026"
+     },
+     {
+      "type": "url",
+      "indices": [
+       1478,
+       1501
+      ],
+      "original": "https://t.co/w2qVHpTpWn",
+      "replacement": "https://github.com/Azzulin/FEW-Recomp",
+      "display": "github.com/Azzulin/FEW-Re\u2026"
+     },
+     {
+      "type": "url",
+      "indices": [
+       1564,
+       1587
+      ],
+      "original": "https://t.co/4gt4WwhAvZ",
+      "replacement": "https://thegamingemporium.com",
+      "display": "thegamingemporium.com"
+     },
+     {
+      "type": "hashtag",
+      "indices": [
+       1589,
+       1609
+      ],
+      "original": "StaticRecompilation"
+     },
+     {
+      "type": "hashtag",
+      "indices": [
+       1610,
+       1627
+      ],
+      "original": "GamePreservation"
+     }
+    ]
+   },
+   "author": {
+    "screen_name": "TheEmporium83",
+    "url": "https://x.com/TheEmporium83",
+    "id": "2124111069345910784",
+    "followers": 410,
+    "following": 182,
+    "likes": 101,
+    "media_count": 27,
+    "statuses": 163,
+    "name": "The Gaming Emporium",
+    "description": "Curator of The Gaming Emporium website. A centralised site for Decompilations, Recompilations, PC Ports, Android Ports and more videogaming goodness.",
+    "raw_description": {
+     "text": "Curator of The Gaming Emporium website. A centralised site for Decompilations, Recompilations, PC Ports, Android Ports and more videogaming goodness.",
+     "facets": []
+    },
+    "location": "Ireland",
+    "banner_url": "",
+    "avatar_url": "https://pbs.twimg.com/profile_images/2124111632401854464/50zQ7cWv_200x200.jpg",
+    "joined": "Sat Nov 21 12:03:57 +0000 2026",
+    "protected": false,
+    "website": {
+     "url": "https://thegamingemporium.com/",
+     "display_url": "thegamingemporium.com"
+    },
+    "verification": {
+     "verified": true,
+     "verified_at": null,
+     "type": "individual"
+    },
+    "type": "profile"
+   },
+   "replies": 0,
+   "reposts": 0,
+   "likes": 0,
+   "bookmarks": 1,
+   "quotes": 0,
+   "embed_card": "tweet",
+   "created_at": "Tue Nov 24 22:51:37 +0000 2026",
+   "created_timestamp": 1795560697,
+   "views": 24,
+   "is_note_tweet": true,
+   "community_note": null,
+   "lang": "en",
+   "replying_to": null,
+   "media": {},
+   "card": {
+    "url": "https://github.com/Azzulin/FEW-Recomp/releases/tag/v0.2.0",
+    "title": "Release FEW Recomp v0.2.0 \u2014 Linux & Steam Deck builds \u00b7 Azzulin/FEW-Recomp",
+    "description": "Linux and Steam Deck can now build the game themselves, with one command. ImportantThis release contains no game files, keys or executable \u2014 only the source. You build the game on your own machine ...",
+    "domain": "github.com",
+    "image": {
+     "width": 800,
+     "height": 419,
+     "url": "https://pbs.twimg.com/card_img/2125361725130125313/ckR1g8kE?format=jpg&name=800x419"
+    }
+   },
+   "provider": "twitter",
+   "reposted_by": null
+  },
+  {
+   "type": "status",
+   "url": "https://x.com/TheEmporium83/status/2125361318689419620",
+   "id": "2125361318689419620",
+   "text": "\ud83d\udd25 POK\u00c9MON LEGENDS: ARCEUS gets a native PC recompilation with 120 FPS support and ultrawide enhancements!\n\nDeveloper CarlosExabyte has released Arceuszada v1.2.0 UltraWide Fix, an independent static recompilation project bringing the 2022 Nintendo Switch adventure to Windows!\n\n\ud83d\udd25 FEATURES:\n\n\u2705 HIGH FRAME RATES \u2014 30, 60, 90 and 120 FPS options without increasing gameplay speed!\n\n\u2705 ULTRAWIDE SUPPORT \u2014 16:9, 21:9 and 32:9 display modes with corrected interface scaling!\n\n\u2705 VULKAN RENDERER \u2014 Improved graphics stability, fixing distorted character models and other rendering issues!\n\n\u2705 PERFORMANCE OPTIMISATIONS \u2014 Recompiled game library reduced from approximately 1.14 GB to 416 MB!\n\n\u2705 IMPROVED AUDIO \u2014 Fixes for distorted sound and background music!\n\n\u2705 STABILITY IMPROVEMENTS \u2014 Resolved several gameplay crashes, saving issues and frozen cutscene animations!\n\n\u26a0\ufe0f Still an experimental fan project, with further optimisations and compatibility improvements planned.\n\n\ud83d\udcbf Requires extracted ExeFS and RomFS files from your own copy of the original game. Compilation takes place locally on your PC.\n\n\ud83d\udee0\ufe0f Developed by CarlosExabyte, drawing on research from LASRecomp and PokeZ-ARecomp.\n\n\u2b50 Support the project with a GitHub star!\n\n\ud83d\udce6 DOWNLOAD:\n\n\ud83d\udd17https://github.com/CarlosExabyte/Arceuszada/releases\n\n\ud83d\udcbb SOURCE CODE:\n\n\ud83d\udd17https://github.com/CarlosExabyte/Arceuszada\n\n\ud83c\udf10 Discover more PC ports, recompilations and fan projects:\n\n\ud83d\udd17https://thegamingemporium.com\n\n#StaticRecompilation #GamePreservation",
+   "raw_text": {
+    "text": "\ud83d\udd25 POK\u00c9MON LEGENDS: ARCEUS gets a native PC recompilation with 120 FPS support and ultrawide enhancements!\n\nDeveloper CarlosExabyte has released Arceuszada v1.2.0 UltraWide Fix, an independent static recompilation project bringing the 2022 Nintendo Switch adventure to Windows!\n\n\ud83d\udd25 FEATURES:\n\n\u2705 HIGH FRAME RATES \u2014 30, 60, 90 and 120 FPS options without increasing gameplay speed!\n\n\u2705 ULTRAWIDE SUPPORT \u2014 16:9, 21:9 and 32:9 display modes with corrected interface scaling!\n\n\u2705 VULKAN RENDERER \u2014 Improved graphics stability, fixing distorted character models and other rendering issues!\n\n\u2705 PERFORMANCE OPTIMISATIONS \u2014 Recompiled game library reduced from approximately 1.14 GB to 416 MB!\n\n\u2705 IMPROVED AUDIO \u2014 Fixes for distorted sound and background music!\n\n\u2705 STABILITY IMPROVEMENTS \u2014 Resolved several gameplay crashes, saving issues and frozen cutscene animations!\n\n\u26a0\ufe0f Still an experimental fan project, with further optimisations and compatibility improvements planned.\n\n\ud83d\udcbf Requires extracted ExeFS and RomFS files from your own copy of the original game. Compilation takes place locally on your PC.\n\n\ud83d\udee0\ufe0f Developed by CarlosExabyte, drawing on research from LASRecomp and PokeZ-ARecomp.\n\n\u2b50 Support the project with a GitHub star!\n\n\ud83d\udce6 DOWNLOAD:\n\n\ud83d\udd17https://t.co/eiz737zStF\n\n\ud83d\udcbb SOURCE CODE:\n\n\ud83d\udd17https://t.co/yuTmCPTH30\n\n\ud83c\udf10 Discover more PC ports, recompilations and fan projects:\n\n\ud83d\udd17https://t.co/4gt4WwhAvZ\n\n#StaticRecompilation #GamePreservation",
+    "display_text_range": [
+     0,
+     1439
+    ],
+    "facets": [
+     {
+      "type": "url",
+      "indices": [
+       1238,
+       1261
+      ],
+      "original": "https://t.co/eiz737zStF",
+      "replacement": "https://github.com/CarlosExabyte/Arceuszada/releases",
+      "display": "github.com/CarlosExabyte/\u2026"
+     },
+     {
+      "type": "url",
+      "indices": [
+       1280,
+       1303
+      ],
+      "original": "https://t.co/yuTmCPTH30",
+      "replacement": "https://github.com/CarlosExabyte/Arceuszada",
+      "display": "github.com/CarlosExabyte/\u2026"
+     },
+     {
+      "type": "url",
+      "indices": [
+       1366,
+       1389
+      ],
+      "original": "https://t.co/4gt4WwhAvZ",
+      "replacement": "https://thegamingemporium.com",
+      "display": "thegamingemporium.com"
+     },
+     {
+      "type": "hashtag",
+      "indices": [
+       1391,
+       1411
+      ],
+      "original": "StaticRecompilation"
+     },
+     {
+      "type": "hashtag",
+      "indices": [
+       1412,
+       1429
+      ],
+      "original": "GamePreservation"
+     }
+    ]
+   },
+   "author": {
+    "screen_name": "TheEmporium83",
+    "url": "https://x.com/TheEmporium83",
+    "id": "2124111069345910784",
+    "followers": 410,
+    "following": 182,
+    "likes": 101,
+    "media_count": 27,
+    "statuses": 163,
+    "name": "The Gaming Emporium",
+    "description": "Curator of The Gaming Emporium website. A centralised site for Decompilations, Recompilations, PC Ports, Android Ports and more videogaming goodness.",
+    "raw_description": {
+     "text": "Curator of The Gaming Emporium website. A centralised site for Decompilations, Recompilations, PC Ports, Android Ports and more videogaming goodness.",
+     "facets": []
+    },
+    "location": "Ireland",
+    "banner_url": "",
+    "avatar_url": "https://pbs.twimg.com/profile_images/2124111632401854464/50zQ7cWv_200x200.jpg",
+    "joined": "Sat Nov 21 12:03:57 +0000 2026",
+    "protected": false,
+    "website": {
+     "url": "https://thegamingemporium.com/",
+     "display_url": "thegamingemporium.com"
+    },
+    "verification": {
+     "verified": true,
+     "verified_at": null,
+     "type": "individual"
+    },
+    "type": "profile"
+   },
+   "replies": 0,
+   "reposts": 0,
+   "likes": 0,
+   "bookmarks": 0,
+   "quotes": 0,
+   "embed_card": "tweet",
+   "created_at": "Tue Nov 24 22:50:00 +0000 2026",
+   "created_timestamp": 1795560600,
+   "views": 15,
+   "is_note_tweet": true,
+   "community_note": null,
+   "lang": "en",
+   "replying_to": null,
+   "media": {},
+   "card": {
+    "url": "https://github.com/CarlosExabyte/Arceuszada/releases",
+    "title": "Releases \u00b7 CarlosExabyte/Arceuszada",
+    "description": "Amateur Pok\u00e9mon Legends: Arceus recompilation project. Requires your own game files. More optimizations and size reductions are coming in future updates! - Releases \u00b7 CarlosExabyte/Arceuszada",
+    "domain": "github.com",
+    "image": {
+     "width": 800,
+     "height": 419,
+     "url": "https://pbs.twimg.com/card_img/2125361318743900160/-8WBY8Ij?format=jpg&name=800x419"
+    }
+   },
+   "provider": "twitter",
+   "reposted_by": null
+  }
+ ],
+ "cursor": {
+  "top": "DAAHCgABHX7QiFlAJxELAAIAAAATMjEyNTM2MjY5NTM1MjU1Mzg4MggAAwAAAAEAAA",
+  "bottom": "DAAHCgABHX7QiFk__-0LAAIAAAATMjEyNTIzNjYwNzYxOTg1NDUwOAgAAwAAAAIAAA"
+ }
+}

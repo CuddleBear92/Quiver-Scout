@@ -10,7 +10,7 @@ from datetime import datetime
 from .decisions import BLACKLIST, LINKED, WAIT_REASONS, WAITING, reason_label
 from . import forges, names
 from .sources import (EXTERNAL, Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
-                      recomplauncher, trilarion, unbaked)
+                      recomplauncher, trilarion, twitter, unbaked)
 from .sources.base import Progress, day, no_progress
 from .store import Store
 from .urls import aliases, canonical, normalize_title
@@ -80,6 +80,14 @@ def _fetch_one(store: Store, name: str, ctx: Context) -> list[Item]:
             store.save_pages(name, cache)
     if name == "osgameclones":
         return osgameclones.fetch(ctx)
+    if name == "twitter":
+        accounts = [a for a in s.get("twitter_accounts", []) if a]
+        cache, status = store.pages("twitter"), store.meta("twitter_status", {})
+        try:
+            return twitter.fetch(ctx, accounts, cache=cache, status=status)
+        finally:
+            store.save_pages("twitter", cache)
+            store.set_meta("twitter_status", status)
     if name == "trilarion":
         return trilarion.fetch(ctx)
     raise ValueError(name)
@@ -416,6 +424,8 @@ class Comparison:
     refresh: dict
 
     links: dict = field(default_factory=dict)  # key -> last link check, for Quiver's apps too
+    posts: list = field(default_factory=list)  # Twitter/X posts kept, newest first (sources/twitter.py)
+    accounts: dict = field(default_factory=dict)  # Twitter/X account -> what its last read found
 
     def _open(self) -> list[Candidate]:
         return [c for c in self.candidates if c.listed and not c.in_quiver and not c.decision and not c.taken_down]
@@ -569,6 +579,9 @@ def compare(store: Store) -> Comparison:
         candidates=sorted(merged.values(), key=lambda c: (c.game or c.title).lower()),
         refresh=store.meta("refresh", {}),
         links=links,
+        posts=sorted((e["data"] for e in store.pages("twitter").values() if e.get("data")),
+                     key=lambda p: (p.get("date", ""), p.get("id", "")), reverse=True),
+        accounts=store.meta("twitter_status", {}),
     )
 
 

@@ -1,4 +1,4 @@
-from . import clonedgames, decompbuddy, osgameclones, playported, quiver, recomplauncher, trilarion, unbaked
+from . import clonedgames, decompbuddy, osgameclones, playported, quiver, recomplauncher, trilarion, twitter, unbaked
 from .base import Context, Item
 
 # The listing sites compared against Quiver, in display order: id -> label.
@@ -10,7 +10,8 @@ EXTERNAL = {
     "osgameclones": "OSGameClones",
     "clonedgames": "Cloned Games",
     "trilarion": "OSGL",
+    "twitter": "Twitter/X",
 }
 
 __all__ = ["EXTERNAL", "Context", "Item", "clonedgames", "decompbuddy", "osgameclones", "playported", "quiver",
-           "recomplauncher", "trilarion", "unbaked"]
+           "recomplauncher", "trilarion", "twitter", "unbaked"]

@@ -24,7 +24,9 @@ from .takendown import TakenDown
 
 DEFAULT_SETTINGS = {
     "sources": {"recomplauncher": True, "decompbuddy": True, "unbaked": True, "playported": True,
-                "osgameclones": True, "clonedgames": True, "trilarion": True},
+                "osgameclones": True, "clonedgames": True, "trilarion": True, "twitter": True},
+    # X (Twitter) accounts whose posts announce recomps and ports, read through FxTwitter (sources/twitter.py).
+    "twitter_accounts": ["TheEmporium83"],
     # Clones are new games in the style of an old one (OSGameClones, Cloned Games and OSGL list many); Quiver
     # can't offer them for the original, so they're left out unless this is on.
     "include_clones": False,

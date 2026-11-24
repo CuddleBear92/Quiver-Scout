@@ -9,7 +9,7 @@ from quiver_scout import engine, forges, linkcheck, names, net, replacements, up
 from quiver_scout.takendown import TakenDown
 from quiver_scout.decisions import BLACKLIST, BLACKLIST_REASONS, LINKED, WAITING, Decisions, reason_label
 from quiver_scout.sources import (Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
-                                  recomplauncher, trilarion, unbaked)
+                                  recomplauncher, trilarion, twitter, unbaked)
 from quiver_scout.sources.base import day
 from quiver_scout.store import Store
 from quiver_scout.urls import aliases, canonical, from_provider, normalize_title
@@ -441,6 +441,89 @@ class Updates(unittest.TestCase):
                 self.assertEqual(popen.call_args.args[0], [str(exe)])
                 updater.cleanup()
             self.assertFalse((Path(d) / "QuiverScout.exe.old").exists())
+
+
+class Twitter(unittest.TestCase):
+    def page(self, ids, bottom):
+        base = json.loads((FIX / "fxtwitter_statuses.json").read_text())["results"][0]
+        posts = [{**base, "id": i, "url": f"https://x.com/acct/status/{i}", "type": "status",
+                  "raw_text": {"facets": [{"type": "url", "replacement": f"https://github.com/dev/game-{i}"}]}}
+                 for i in ids]
+        return {"results": posts, "cursor": {"bottom": bottom}}
+
+    def serve(self, pages, fail_at=()):
+        """pages: cursor (None for the newest) -> answer. fail_at: cursors that answer 404 forever."""
+        asked = []
+
+        def fake(url, **kw):
+            cursor = url.split("cursor=", 1)[1] if "cursor=" in url else None
+            if "/statuses" not in url:
+                return net.Response(200, json.dumps({"user": {"name": "Acct", "tweets": 99}}).encode())
+            asked.append(cursor)
+            if cursor in fail_at:
+                raise net.HTTPStatusError("404", 404)
+            return net.Response(200, json.dumps(pages[cursor]).encode())
+        return fake, asked
+
+    def test_real_posts_parse(self):
+        posts = [twitter.parse_post(p) for p in json.loads((FIX / "fxtwitter_statuses.json").read_text())["results"]]
+        first = posts[0]
+        self.assertTrue(first["id"] and first["url"].startswith("https://x.com/"))
+        self.assertTrue(all(not twitter.SKIP_HOSTS.search(l.split("/")[2]) for p in posts for l in p["links"]))
+        self.assertTrue(any(p["game"] for p in posts))
+
+    def test_words(self):
+        self.assertEqual(twitter.game_of("🔥 FIRE EMBLEM WARRIORS gets a native Windows recomp"), "Fire Emblem Warriors")
+        self.assertEqual(twitter.runs_on_of("SEGA RALLY 2 gets a native Android recompilation"), "Android")
+        self.assertEqual(twitter.handle_of("https://x.com/TheEmporium83/status/1"), "TheEmporium83")
+        self.assertEqual(twitter.handle_of("@some_one"), "some_one")
+        self.assertIsNone(twitter.handle_of("not a handle!"))
+
+    def test_whole_history_then_catch_up_then_resume(self):
+        pages = {None: self.page(["9", "8"], "c1"), "c1": self.page(["7", "6"], "c2"), "c2": {"results": []}}
+        fake, asked = self.serve(pages)
+        cache, status = {}, {}
+        with mock.patch.object(net, "request", side_effect=fake):
+            twitter.fetch(Context(), ["acct"], cache, status, sleep=lambda s: None)
+        self.assertEqual(sorted(e["data"]["id"] for e in cache.values()), ["6", "7", "8", "9"])
+        self.assertTrue(status["acct"]["complete"])
+        # Next refresh: one new post; reading stops at the first page with a known post.
+        pages[None] = self.page(["10", "9"], "c1")
+        asked.clear()
+        with mock.patch.object(net, "request", side_effect=fake):
+            items = twitter.fetch(Context(), ["acct"], cache, status, sleep=lambda s: None)
+        self.assertEqual(asked, [None])
+        self.assertEqual(status["acct"]["new"], 1)
+        self.assertIn("github.com/dev/game-10", {i.key for i in items})
+
+    def test_a_failing_page_keeps_what_was_read_and_carries_on_next_time(self):
+        pages = {None: self.page(["9", "8"], "c1"), "c1": self.page(["7", "6"], "c2"), "c2": {"results": []}}
+        fake, asked = self.serve(pages, fail_at=("c1",))
+        cache, status = {}, {}
+        with mock.patch.object(net, "request", side_effect=fake):
+            twitter.fetch(Context(), ["acct"], cache, status, sleep=lambda s: None)
+        self.assertEqual(sorted(e["data"]["id"] for e in cache.values()), ["8", "9"])
+        self.assertEqual((status["acct"].get("complete"), status["acct"]["history_cursor"]), (None, "c1"))
+        self.assertIn("error", status["acct"])
+        fake, asked = self.serve(pages)  # FxTwitter answers again
+        with mock.patch.object(net, "request", side_effect=fake):
+            twitter.fetch(Context(), ["acct"], cache, status, sleep=lambda s: None)
+        self.assertEqual(sorted(e["data"]["id"] for e in cache.values()), ["6", "7", "8", "9"])
+        self.assertTrue(status["acct"]["complete"])
+        self.assertNotIn("error", status["acct"])
+
+    def test_reposts_stay_with_the_account_read_and_unfollowed_accounts_go(self):
+        page = self.page(["5"], "c1")
+        page["results"][0]["author"] = {"screen_name": "someone_else"}
+        fake, _ = self.serve({None: page, "c1": {"results": []}})
+        cache, status = {}, {}
+        with mock.patch.object(net, "request", side_effect=fake):
+            twitter.fetch(Context(), ["acct"], cache, status, sleep=lambda s: None)
+        post = next(iter(cache.values()))["data"]
+        self.assertEqual((post["account"], post["author"]), ("acct", "someone_else"))
+        with mock.patch.object(net, "request", side_effect=fake):
+            twitter.fetch(Context(), [], cache, status, sleep=lambda s: None)
+        self.assertEqual((cache, status), ({}, {}))
 
 
 class ConditionalDownloads(unittest.TestCase):
