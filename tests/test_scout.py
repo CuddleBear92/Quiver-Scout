@@ -439,6 +439,7 @@ class Updates(unittest.TestCase):
                 self.assertEqual(exe.read_bytes(), b"new build")
                 self.assertEqual((Path(d) / "QuiverScout.exe.old").read_bytes(), b"old build")
                 self.assertEqual(popen.call_args.args[0], [str(exe)])
+                self.assertEqual(popen.call_args.kwargs["env"]["PYINSTALLER_RESET_ENVIRONMENT"], "1")
                 updater.cleanup()
             self.assertFalse((Path(d) / "QuiverScout.exe.old").exists())
 
@@ -524,6 +525,48 @@ class Twitter(unittest.TestCase):
         with mock.patch.object(net, "request", side_effect=fake):
             twitter.fetch(Context(), [], cache, status, sleep=lambda s: None)
         self.assertEqual((cache, status), ({}, {}))
+
+
+class FailuresAndRelaunch(unittest.TestCase):
+    def test_new_build_starts_in_a_fresh_environment(self):
+        with mock.patch.dict(updater.os.environ, {"_MEIPASS2": "C:/Temp/_MEI1", "_PYI_ARCHIVE_FILE": "x", "PATH": "p"}):
+            env = updater.fresh_environment()
+        self.assertEqual(env["PYINSTALLER_RESET_ENVIRONMENT"], "1")
+        self.assertNotIn("_MEIPASS2", env)
+        self.assertNotIn("_PYI_ARCHIVE_FILE", env)
+        self.assertEqual(env["PATH"], "p")
+
+    def test_only_network_failures_count_against_a_site(self):
+        import socket
+        import urllib.error
+        local = urllib.error.URLError(FileNotFoundError(2, "No such file", "C:/Temp/_MEI492482/base_library.zip"))
+        self.assertFalse(linkcheck.network_failure(local))
+        self.assertTrue(linkcheck.network_failure(urllib.error.URLError(socket.timeout("timed out"))))
+        self.assertTrue(linkcheck.network_failure(urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))))
+        try:
+            try:
+                raise urllib.error.URLError(ConnectionRefusedError(10061, "refused"))
+            except urllib.error.URLError as e:
+                raise net.FetchError("https://x: refused") from e
+        except net.FetchError as wrapped:
+            self.assertTrue(linkcheck.network_failure(wrapped))
+        self.assertFalse(linkcheck.network_failure(urllib.error.URLError("Tunnel connection failed: 403")))
+
+    def test_local_errors_and_an_offline_computer_mark_nothing_down(self):
+        import socket
+        import urllib.error
+        links = [(f"example{n}.com/x", f"https://example{n}.com/x") for n in range(12)]
+        broken = urllib.error.URLError(FileNotFoundError(2, "No such file"))
+        with mock.patch.object(linkcheck, "page", side_effect=broken):
+            self.assertEqual(linkcheck.check(links, {}, {}), {})
+        offline = urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))
+        with mock.patch.object(linkcheck, "page", side_effect=offline):
+            self.assertEqual(linkcheck.check(links, {}, {}), {})  # all of them at once: this computer
+        one_down = lambda k, u: (_ for _ in ()).throw(offline) if k == "example0.com/x" else {"status": "ok"}  # noqa: E731
+        with mock.patch.object(linkcheck, "page", side_effect=one_down):
+            out = linkcheck.check(links, {}, {})
+        self.assertEqual(out["example0.com/x"]["status"], "suspect")  # one site not answering still counts
+        self.assertEqual(out["example1.com/x"]["status"], "ok")
 
 
 class ConditionalDownloads(unittest.TestCase):
@@ -884,6 +927,13 @@ class Compare(unittest.TestCase):
         path.write_text(json.dumps({"version": 1, "decisions": {
             "github.com/a/b": {"list": LINKED, "title": "B", "quiver": "b-app", "quiver_title": "B App", "date": "2026-11-24"}}}))
         self.assertEqual(engine.import_file(self.store, str(path)), ("decisions", {"added": 1, "updated": 0, "kept": 0}))
+
+
+    def test_down_keys_for_checking_again(self):
+        self.store.save_links({"github.com/a/gone": {"status": "gone", "checked": "2026-11-24"},
+                               "example.com/x": {"status": "suspect", "checked": "2026-11-24"},
+                               "github.com/a/ok": {"status": "ok", "checked": "2026-11-24"}})
+        self.assertEqual(sorted(engine.down_keys(self.store)), ["example.com/x", "github.com/a/gone"])
 
 
     def test_csv_exports(self):

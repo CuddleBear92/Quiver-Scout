@@ -225,6 +225,11 @@ A link is checked again after 14 days if it was fine, 60 if it was taken down, a
 With a GitHub token, links that are due are checked after every refresh (Settings → Sites can turn that off). In
 the In Quiver tab, Quiver apps whose own link is taken down are red.
 
+Only a site failing to answer counts against it: an error on this computer's side doesn't, and when most sites fail
+at once the computer is taken to be offline and nothing is marked. **File → Check taken-down links again** checks
+every link marked taken down (or not answering) right away, without waiting for it to be due, and clears the ones
+that are back, from the shared `taken-down.json` too.
+
 ### Live check of Down in Quiver
 
 The catalog Quiver Scout reads from api.quiverlauncher.com is Cloudflare's cached copy, which can be up to 20
