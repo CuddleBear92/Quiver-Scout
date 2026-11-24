@@ -48,7 +48,9 @@ SMALL = {"of", "the", "a", "an", "and", "in", "on", "for", "to", "with", "at", "
 FILE_NAME = re.compile(r"^[^/]+\.(zip|rar|7z|exe|iso|rom|bin|z64|n64|nds|gba|wad|pak|xex|elf|nsp|xci|apk|tar|gz)$", re.I)
 ROMAN = {"II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII", "PC", "HD", "3D", "2D", "VR"}
 
-WAITS = (20, 40, 60, 90)  # seconds before asking again when FxTwitter says not now
+# Seconds before asking again when FxTwitter says not now. It answers 404 to about half of all requests, at random,
+# in runs of up to ten or so, so asking again soon, many times, gets through far sooner than long pauses do.
+WAITS = (2, 2, 3, 3, 3, 5, 5, 5, 5, 8, 8, 8, 10, 10, 15, 15, 20, 30, 45, 60)
 BETWEEN_PAGES = 10
 HISTORY_PAGES = 50  # pages of history (about 1,000 posts) read back per account per refresh
 
@@ -152,16 +154,23 @@ def parse_post(post: dict, own_site: str = "") -> dict:
 def _get(url: str, sleep, progress=None, what: str = "") -> dict:
     """One FxTwitter answer, asking again after a pause when it says not now."""
     last = None
-    for wait in (0, *WAITS):
+    for n, wait in enumerate((0, *WAITS)):
         if wait:
-            if progress:
-                progress(f"Twitter/X: {what} not answered yet, asking again in {wait} s", 0, 0)
+            if progress and (n == 1 or n % 5 == 0):
+                progress(f"Twitter/X: {what}: FxTwitter said {_why(last)}; asking again ({n} of {len(WAITS)})", 0, 0)
             sleep(wait)
         try:
             return json.loads(net.request(url, retries=1, timeout=30).body)
         except (net.HTTPStatusError, net.FetchError, ValueError) as e:
             last = e
-    raise net.FetchError(f"FxTwitter didn't answer ({last})")
+    raise net.FetchError(f"FxTwitter didn't answer after {len(WAITS) + 1} tries (last: {_why(last)})")
+
+
+def _why(error) -> str:
+    if isinstance(error, net.HTTPStatusError):
+        return f"HTTP {error.status}"
+    text = str(error)
+    return text.split(": ", 1)[-1] if text.startswith("http") else text
 
 
 def account_info(name: str, sleep=time.sleep, progress=None) -> dict:

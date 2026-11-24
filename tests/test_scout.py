@@ -466,6 +466,24 @@ class Twitter(unittest.TestCase):
             return net.Response(200, json.dumps(pages[cursor]).encode())
         return fake, asked
 
+    def test_random_404s_are_asked_again_soon(self):
+        answers = iter([net.HTTPStatusError("404", 404)] * 8 + [None])
+        waits, said = [], []
+
+        def fake(url, **kw):
+            e = next(answers)
+            if e:
+                raise e
+            return net.Response(200, b'{"results": []}')
+        with mock.patch.object(net, "request", side_effect=fake):
+            self.assertEqual(twitter._get("https://x/statuses", waits.append, lambda m, *a: said.append(m), "@a"),
+                             {"results": []})
+        self.assertLess(sum(waits), 40)  # eight 404s in a row cost half a minute, not minutes
+        self.assertIn("HTTP 404", said[0])
+        with mock.patch.object(net, "request", side_effect=net.HTTPStatusError("404", 404)):
+            with self.assertRaisesRegex(net.FetchError, "HTTP 404"):
+                twitter._get("https://x/statuses", lambda s: None)
+
     def test_real_posts_parse(self):
         posts = [twitter.parse_post(p) for p in json.loads((FIX / "fxtwitter_statuses.json").read_text())["results"]]
         first = posts[0]
