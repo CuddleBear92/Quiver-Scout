@@ -55,7 +55,7 @@ def request(url: str, headers: dict | None = None, timeout: float = 30, retries:
             last = e
         if attempt + 1 < retries:
             time.sleep(1.5 * (attempt + 1))
-    raise FetchError(f"{url}: {last}")
+    raise FetchError(f"{url}: {last}") from last  # the cause tells a network failure from a local one
 
 
 def get_bytes(url: str, **kw: Any) -> bytes:

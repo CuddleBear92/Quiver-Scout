@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -135,7 +136,18 @@ def install(new_exe: Path) -> None:
         old.rename(exe)  # put the running one back
         raise UpdateError(f"Couldn't put the new build in place: {e}") from e
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen([str(exe)], close_fds=True, creationflags=flags, cwd=str(exe.parent))
+    subprocess.Popen([str(exe)], close_fds=True, creationflags=flags, cwd=str(exe.parent), env=fresh_environment())
+
+
+def fresh_environment() -> dict:
+    """The environment to start the new build in. A PyInstaller exe tells the programs it starts where it unpacked
+    itself (_MEIPASS2, _PYI_*), so that its own child processes reuse that folder; a new build given those would
+    use this one's folder, which is deleted when this one quits, and fail to load anything after (every download
+    then fails with "No such file or directory: ...\\_MEI...\\base_library.zip"). PYINSTALLER_RESET_ENVIRONMENT
+    (PyInstaller 6.10 and later) tells it to start afresh, and the variables are dropped besides."""
+    env = {k: v for k, v in os.environ.items() if not (k.startswith("_PYI_") or k.startswith("_MEI"))}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
 
 
 def cleanup() -> None:

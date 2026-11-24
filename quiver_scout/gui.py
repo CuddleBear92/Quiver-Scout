@@ -628,6 +628,7 @@ class App:
         f.add_separator()
         f.add_command(label="Check links (new and due)", accelerator="Ctrl+L", command=self.check_links)
         f.add_command(label="Check every link again", command=lambda: self.check_links(everything=True))
+        f.add_command(label="Check taken-down links again", command=self.recheck_down)
         f.add_command(label="Check Down in Quiver against live Quiver", command=self.check_quiver_live)
         f.add_separator()
         f.add_command(label="Export this list as CSV…", accelerator="Ctrl+E", command=self.export_view)
@@ -1852,6 +1853,15 @@ class App:
         self.log("--- Link check started")
         self._start("links", "Checking links…",
                     lambda say: engine.check_links(self.store, say, keys=keys, everything=everything))
+
+    def recheck_down(self) -> None:
+        """Check again every link found taken down or not answering (Taken down, Down in Quiver): links found fine
+        leave those tabs and the shared list."""
+        keys = engine.down_keys(self.store)
+        if not keys:
+            self.status.config(text="No link is marked taken down.", style="TLabel")
+            return
+        self.check_links(keys=keys)
 
     def _start(self, job: str, text: str, work_fn) -> None:
         self.refreshing = True

@@ -235,6 +235,12 @@ def link_states(store: Store) -> dict[str, dict]:
     return out
 
 
+def down_keys(store: Store) -> list[str]:
+    """Every link last found taken down, or not answering: to check them again in one go."""
+    from .linkcheck import TAKEN_DOWN
+    return [k for k, e in link_states(store).items() if e.get("status") in TAKEN_DOWN | {"suspect"}]
+
+
 def host_kinds(store: Store, quiver_items: list[Item]) -> dict[str, str]:
     """host -> "gitlab" or "gitea", for checking links through their APIs."""
     kinds = {h: "gitea" for h in GITEA_HOSTS}

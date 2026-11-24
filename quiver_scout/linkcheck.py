@@ -18,6 +18,8 @@ What a check finds:
 from __future__ import annotations
 
 import json
+import socket
+import ssl
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -41,6 +43,31 @@ GITLAB_TOKEN_PAGE = "https://gitlab.com/-/user_settings/personal_access_tokens?n
 
 class RateLimited(Exception):
     pass
+
+
+# Failures that mean the site didn't answer. Anything else (a file this computer couldn't open, a proxy refusing)
+# says nothing about the site, so it isn't counted against it.
+NETWORK_FAILURES = (socket.timeout, TimeoutError, ConnectionError, socket.gaierror, ssl.SSLError)
+# More than this share of sites failing at once means this computer is offline, not that they all went down.
+OFFLINE_SHARE = 0.5
+
+
+def network_failure(error: BaseException | None) -> bool:
+    """Whether an error (or what caused it) is the site not answering."""
+    seen = 0
+    while error is not None and seen < 5:
+        if isinstance(error, NETWORK_FAILURES):
+            return True
+        if isinstance(error, urllib.error.URLError) and not isinstance(error, urllib.error.HTTPError):
+            reason = error.reason
+            if isinstance(reason, BaseException):
+                error = reason
+                seen += 1
+                continue
+            return False
+        error = error.__cause__ or error.__context__
+        seen += 1
+    return False
 
 
 def due(entry: dict | None, today: date) -> bool:
@@ -258,10 +285,16 @@ def check(links: list[tuple[str, str]], kinds: dict[str, str], tokens: dict[str,
                     results[k] = r
             except (net.HTTPStatusError, ValueError):
                 pass
-            except Exception:
-                unreachable.append(k)
+            except Exception as e:
+                if network_failure(e):
+                    unreachable.append(k)
+                # anything else is this computer's trouble, not the site's: no result, checked again next time
             if done % 25 == 0:
                 say(f"Link check: {done}/{total}", done, total)
+    if len(unreachable) >= 10 and len(unreachable) > OFFLINE_SHARE * max(len(rest), 1):
+        say(f"Link check: {len(unreachable)} of {len(rest)} sites didn't answer; this computer looks offline, so none "
+            "is counted as down", done, total)
+        unreachable = []
     for k in unreachable:
         results[k] = _result("suspect", "didn't answer")
     return results
