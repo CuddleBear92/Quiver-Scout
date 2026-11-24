@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .decisions import BLACKLIST, WAIT_REASONS, WAITING, reason_label
+from .decisions import BLACKLIST, LINKED, WAIT_REASONS, WAITING, reason_label
 from . import forges, names
 from .sources import (EXTERNAL, Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
                       recomplauncher, trilarion, unbaked)
@@ -370,6 +370,7 @@ class Candidate:
     decision: dict | None = None
     supported_host: bool = True
     forge: str = ""  # "forgejo" or "gitea" when its site was found to be a self-hosted one
+    linked_app: Item | None = None  # the Quiver app it was marked as by hand (LINKED), if still in Quiver
     link: dict | None = None  # the last link check (linkcheck.py): status, checked, moved_to...
 
     @property
@@ -498,6 +499,7 @@ def compare(store: Store) -> Comparison:
             if normalize_title(g):
                 by_game.setdefault(normalize_title(g), []).append(q)
 
+    by_slug = {q.slug: q for q in quiver_items}
     merged: dict[str, Candidate] = {}
     for i in sorted((i for i in items if i.source != "quiver"), key=lambda i: ORDER.index(i.source)):
         c = merged.get(i.key)
@@ -554,6 +556,11 @@ def compare(store: Store) -> Comparison:
             c.same_app = [q for q in named if made_by & creators(q.key, q.author)]
             c.same_game = by_game.get(normalize_title(c.game), [])
         c.decision = store.decisions.get(c.key)
+        if c.decision and c.decision.get("list") == LINKED:
+            # Marked as in Quiver by hand: it counts as that app (gone from Quiver: as none).
+            c.linked_app = by_slug.get(c.decision.get("quiver", ""))
+            if c.linked_app and c.linked_app not in c.in_quiver:
+                c.in_quiver = [c.linked_app, *c.in_quiver]
         c.supported_host = c.host in hosts
         c.forge = (forge_sites.get(c.host) or {}).get("kind", "")
 
@@ -601,9 +608,15 @@ def export_file(store: Store, which: str, path: str) -> int:
     return count
 
 
-def decide(store: Store, which: str, candidates: list[Candidate], reason: str = "", note: str = "") -> None:
+def decide(store: Store, which: str, candidates: list[Candidate], reason: str = "", note: str = "",
+           extra: dict | None = None) -> None:
     store.decisions.set(which, [{"key": c.key, "title": c.title, "game": c.game, "url": c.url} for c in candidates],
-                        reason=reason, note=note, by=store.settings.get("your_name", ""))
+                        reason=reason, note=note, by=store.settings.get("your_name", ""), extra=extra)
+
+
+def link_to_quiver(store: Store, candidates: list[Candidate], app: Item, note: str = "") -> None:
+    """Mark projects as in Quiver, as `app`: for when Quiver has them at another address no rule can tell."""
+    decide(store, LINKED, candidates, note=note, extra={"quiver": app.slug, "quiver_title": app.title})
 
 
 def undecide(store: Store, keys: list[str]) -> None:

@@ -83,6 +83,7 @@ pip install .
 | **Taken down** | Projects whose link was found deleted, blocked (DMCA), disabled, or unreachable (see *Checking links*). Kept out of Missing and Other sites. |
 | **Waiting** | Projects you're waiting on, and why: Quiver must support its site first, no source code yet, no release file yet, or something else, with a note. A green row is in Quiver now, so you can take it off the list. |
 | **Blacklist** | Projects you decided not to add, with a reason and a note. Grey rows are no longer listed anywhere. |
+| **Linked** | Projects you marked as in Quiver by hand, and the Quiver app each one is: for when Quiver has it at an address no rule can tell (say, a launcher for the game's code). Red rows: that app has left Quiver. |
 | **In Quiver** | Quiver's catalog, each app's latest release, and which other sites also list it. |
 | **Down in Quiver** | Quiver's own live apps whose repository is taken down, to archive them or swap in a new host. Green rows have a possible replacement (see below). Apps you archive, or whose repository you change, leave it (see *Live check*). |
 | **Log** | What each refresh did, and any site that failed. |
@@ -145,6 +146,7 @@ follow too. Alt+F, Alt+V and Alt+H open the menus.
 | Q | Open in Quiver: the app's page on quiverlauncher.com, or, for a project Quiver doesn't have, the pages of the Quiver apps that may be it (App in Quiver), else of Quiver's apps for the same game |
 | Ctrl+C | Copy the selected rows' URLs |
 | W | Wait for it (on Waiting: change why) |
+| L | Mark as in Quiver: pick the Quiver app it is |
 | Delete | Blacklist (on Waiting and Blacklist: back to the list) |
 | Backspace | Back to the list, from Waiting or Blacklist |
 | Ctrl+A | Select every row |
@@ -229,6 +231,15 @@ the GitLab link opens the form with `read_api` ticked.
 
 Tokens are kept in `tokens.json` in the data folder, not in `settings.json`, so settings can be shared and tokens
 not. The `GITHUB_TOKEN` and `GITLAB_TOKEN` environment variables work too.
+
+### Marking a project as in Quiver
+
+Sometimes Quiver has a project at an address nothing can match: the listing sites have the game's code, and Quiver
+the launcher for it (Longshot is one). Right-click it, **Mark as in Quiver**, and pick the app: the ones *App in
+Quiver* and the same game suggest are one click away, and *as another Quiver app…* (or **L**) opens a list of all
+of Quiver's apps to search by name, game, slug or repository, with an optional note. The project leaves Missing for
+the Linked tab, and counts as that app (In Quiver shows the sites listing it). *Back to list* undoes it. Links are
+kept in the decisions file with Waiting and Blacklist, so maintainers sharing it share them.
 
 ## Sharing between maintainers
 

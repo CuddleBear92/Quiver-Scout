@@ -7,7 +7,7 @@ from unittest import mock
 
 from quiver_scout import engine, forges, linkcheck, names, net, replacements, updater
 from quiver_scout.takendown import TakenDown
-from quiver_scout.decisions import BLACKLIST, BLACKLIST_REASONS, WAITING, Decisions, reason_label
+from quiver_scout.decisions import BLACKLIST, BLACKLIST_REASONS, LINKED, WAITING, Decisions, reason_label
 from quiver_scout.sources import (Context, Item, clonedgames, decompbuddy, osgameclones, playported, quiver,
                                   recomplauncher, trilarion, unbaked)
 from quiver_scout.sources.base import day
@@ -772,6 +772,35 @@ class Compare(unittest.TestCase):
         self.assertEqual(b.platforms, ["PlayStation 2", "Xbox"])
         d = by["D"]
         self.assertEqual((d.stars, d.downloads, d.players, d.score, d.reports, d.platforms), (0, 0, 0, None, 0, []))
+
+
+    def test_marking_a_project_as_in_quiver_by_hand(self):
+        self.put([Item("quiver", "https://git.magicbean.dev/MagicBeanDev/LongshotLauncher", "Longshot", slug="longshot-launcher"),
+                  Item("unbaked", "https://git.magicbean.dev/MagicBeanDev/Longshot", "Longshot"),
+                  Item("unbaked", "https://github.com/x/other", "Other")])
+        r = engine.compare(self.store)
+        code = next(c for c in r.missing if c.title == "Longshot")
+        app = r.quiver[0]
+        engine.link_to_quiver(self.store, [code], app, note="the game's code; Quiver has the launcher")
+        r = engine.compare(self.store)
+        self.assertEqual([c.title for c in r.missing], ["Other"])
+        linked = r.decided(LINKED)[0]
+        self.assertEqual((linked.linked_app.slug, [q.slug for q in linked.in_quiver]), ("longshot-launcher", ["longshot-launcher"]))
+        self.assertEqual(self.store.decisions.get(linked.key)["quiver"], "longshot-launcher")
+        self.assertEqual(engine.status_of(linked), "in quiver")
+        # The app leaves Quiver: the link stays, pointing at nothing, for a maintainer to look at.
+        self.put([Item("quiver", "https://github.com/q/q", "Q", slug="q")])
+        gone = engine.compare(self.store).decided(LINKED)[0]
+        self.assertEqual((gone.linked_app, gone.in_quiver), (None, []))
+        engine.undecide(self.store, [gone.key])
+        back = engine.compare(self.store)  # its host is no longer one Quiver has an app from: Other sites
+        self.assertIn("Longshot", [c.title for c in back.missing + back.other_sites])
+
+    def test_links_travel_in_the_shared_file(self):
+        path = Path(self.tmp.name) / "theirs.json"
+        path.write_text(json.dumps({"version": 1, "decisions": {
+            "github.com/a/b": {"list": LINKED, "title": "B", "quiver": "b-app", "quiver_title": "B App", "date": "2026-11-24"}}}))
+        self.assertEqual(engine.import_file(self.store, str(path)), ("decisions", {"added": 1, "updated": 0, "kept": 0}))
 
 
     def test_csv_exports(self):

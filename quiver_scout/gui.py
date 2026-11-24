@@ -14,7 +14,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from . import engine, theme, updater
-from .decisions import BLACKLIST, BLACKLIST_REASONS, WAIT_REASONS, WAITING, reason_label
+from .decisions import BLACKLIST, BLACKLIST_REASONS, LINKED, WAIT_REASONS, WAITING, reason_label
 from .engine import Candidate, Comparison
 from .sources import EXTERNAL, Item
 from .linkcheck import TAKEN_DOWN as TAKEN_DOWN_STATES
@@ -51,6 +51,7 @@ COL = {
     "players": ("Played (90 days)", 130, "num"),
     "score": ("Score", 60, "num"),
     "reports": ("Reports", 70, "num"),
+    "quiver_app": ("Quiver app", 240, ""),
     "url": ("URL", 300, ""),
 }
 
@@ -64,6 +65,7 @@ TABS = {
     "waiting": ("Waiting", ["title", "game", "reason", "note", "stars", "downloads", "players", "score", "reports", "released", "version", "sources", "since", "by", "state",
                             "runs_on", "link", "checked", "url"]),
     "blacklist": ("Blacklist", ["title", "game", "reason", "note", "since", "by", "state", "link", "checked", "url"]),
+    "linked": ("Linked", ["title", "game", "quiver_app", "note", "since", "by", "state", "link", "checked", "url"]),
     "quiver": ("In Quiver", ["title", "game", "stars", "downloads", "players", "score", "reports", "released", "version", "added", "also_on", "link", "checked", "slug",
                              "url"]),
     "qdown": ("Down in Quiver", ["title", "game", "link", "checked", "replacement", "stars", "downloads", "players", "released", "version", "added", "slug",
@@ -487,6 +489,79 @@ class DecisionDialog(tk.Toplevel):
         self.destroy()
 
 
+class QuiverAppPicker(tk.Toplevel):
+    """Pick one of Quiver's apps: type to search by name, game, slug or repository; Enter or double-click to pick."""
+
+    def __init__(self, app: "App", message: str, apps: list[Item], search: str = "", preselect: Item | None = None):
+        super().__init__(app.root)
+        self.result: tuple[Item, str] | None = None
+        self.apps = sorted(apps, key=lambda q: q.title.lower())
+        self.shown: list[Item] = []
+        c = app.c
+        self.title("Mark as in Quiver")
+        self.transient(app.root)
+        body = ttk.Frame(self, padding=16)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text=message, font=c["fonts"]["bold"], wraplength=560).pack(anchor="w")
+        ttk.Label(body, text="Search Quiver's apps (name, game, slug or repository):", style="Muted.TLabel").pack(
+            anchor="w", pady=(10, 2))
+        self.query = tk.StringVar(value=search)
+        entry = ttk.Entry(body, textvariable=self.query, width=70)
+        entry.pack(fill="x")
+        frame = ttk.Frame(body)
+        frame.pack(fill="both", expand=True, pady=(6, 0))
+        self.list = tk.Listbox(frame, height=14, activestyle="none", exportselection=False, borderwidth=0,
+                               highlightthickness=1, background=c["surface"], foreground=c["fg"],
+                               selectbackground=c["select"], selectforeground=c["on_select"],
+                               highlightbackground=c["border"], highlightcolor=c["accent"])
+        bar = ttk.Scrollbar(frame, orient="vertical", command=self.list.yview)
+        self.list.configure(yscrollcommand=bar.set)
+        self.list.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+        ttk.Label(body, text="Note (optional):", style="Muted.TLabel").pack(anchor="w", pady=(10, 2))
+        self.note = tk.StringVar()
+        ttk.Entry(body, textvariable=self.note, width=70).pack(fill="x")
+        buttons = ttk.Frame(body)
+        buttons.pack(fill="x", pady=(14, 0))
+        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text="Mark as in Quiver", style="Accent.TButton", command=self.ok).pack(side="right", padx=6)
+        self.query.trace_add("write", lambda *_: self.fill())
+        self.list.bind("<Double-1>", lambda e: self.ok())
+        self.bind("<Return>", lambda e: self.ok())
+        self.bind("<Escape>", lambda e: self.destroy())
+        entry.bind("<Down>", lambda e: (self.list.focus_set(), self.list.selection_set(0) if self.shown else None))
+        self.fill(preselect)
+        if not self.shown and search:  # nothing by its own name: show everything rather than nothing
+            self.query.set("")
+        theme.dark_title_bar(self, c["dark"])
+        entry.focus_set()
+        entry.select_range(0, "end")
+        self.grab_set()
+        self.update_idletasks()
+        x = app.root.winfo_rootx() + (app.root.winfo_width() - self.winfo_width()) // 2
+        y = app.root.winfo_rooty() + (app.root.winfo_height() - self.winfo_height()) // 4
+        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        self.wait_window()
+
+    def fill(self, preselect: Item | None = None) -> None:
+        words = self.query.get().lower().split()
+        self.shown = [q for q in self.apps
+                      if all(any(w in f.lower() for f in (q.title, q.game, q.slug, q.url)) for w in words)][:300]
+        self.list.delete(0, "end")
+        for q in self.shown:
+            self.list.insert("end", f"{q.title}   ·   {q.game}   ·   {q.url.split('://', 1)[-1]}")
+        if self.shown:
+            i = self.shown.index(preselect) if preselect in self.shown else 0
+            self.list.selection_set(i)
+            self.list.see(i)
+
+    def ok(self) -> None:
+        sel = self.list.curselection()
+        if sel and self.shown:
+            self.result = (self.shown[sel[0]], self.note.get().strip())
+            self.destroy()
+
+
 class App:
     def __init__(self, root: tk.Tk, store: Store):
         self.root = root
@@ -800,6 +875,7 @@ class App:
             t.tree.bind("<Delete>", lambda e: self.delete_key())
             t.tree.bind("<BackSpace>", lambda e: self.undecide_selected())
             t.tree.bind("<KeyPress-w>", lambda e: self.wait_selected())
+            t.tree.bind("<KeyPress-l>", lambda e: self.link_selected())
             t.tree.bind("<KeyPress-q>", lambda e: self.open_quiver())
             t.tree.bind("<Control-c>", lambda e: self.copy_urls())
             t.tree.bind("<Control-a>", lambda e, t=t: t.tree.selection_set(t.tree.get_children()))
@@ -813,6 +889,7 @@ class App:
             "Q\tOpen the Quiver listing (the app, or Quiver's apps for the same game)",
             "Ctrl+C\tCopy URLs of the selected rows",
             "W\tWait for it (on Waiting: change why)",
+            "L\tMark as in Quiver: pick the Quiver app it is",
             "Delete\tBlacklist (on Waiting and Blacklist: back to the list)",
             "Backspace\tBack to the list, from Waiting or Blacklist",
             "Ctrl+A\tSelect every row in the list",
@@ -917,7 +994,9 @@ class App:
 
     def _values(self, c: Candidate) -> dict:
         d = c.decision or {}
-        if c.in_quiver:
+        if d.get("list") == LINKED:
+            state = "" if c.linked_app else "app not in Quiver now"
+        elif c.in_quiver:
             state = "in Quiver now"
         elif not c.listed:
             state = "no longer listed"
@@ -932,6 +1011,7 @@ class App:
             "same_game": f"yes ({len(c.same_game)})" if c.same_game else "",
             "reason": reason_label(d), "note": d.get("note", ""),
             "since": d.get("date", ""), "by": d.get("by", ""), "state": state, "url": c.url,
+            "quiver_app": (c.linked_app.title if c.linked_app else d.get("quiver_title", "")) if d.get("quiver") else "",
             **link_values(c.link),
         }
 
@@ -943,6 +1023,7 @@ class App:
             "taken": self._filtered(r.taken_down, True),
             "waiting": self._filtered(r.decided(WAITING), False),
             "blacklist": self._filtered(r.decided(BLACKLIST), False),
+            "linked": self._filtered(r.decided(LINKED), False),
         }
 
     def render(self) -> None:
@@ -958,7 +1039,7 @@ class App:
         self.qdown_shown = [iid for iid in self.quiver_shown if self.quiver_rows[iid].key in down]
         totals = {"missing": len(r.missing), "other": len(r.other_sites), "taken": len(r.taken_down),
                   "waiting": len(r.decided(WAITING)),
-                  "blacklist": len(r.decided(BLACKLIST)), "quiver": len(r.quiver), "qdown": len(r.quiver_down)}
+                  "blacklist": len(r.decided(BLACKLIST)), "linked": len(r.decided(LINKED)), "quiver": len(r.quiver), "qdown": len(r.quiver_down)}
         for tab, table in self.tables.items():
             shown = {"quiver": len(self.quiver_shown), "qdown": len(self.qdown_shown)}.get(tab) \
                 if tab in QUIVER_TABS else len(self.lists[tab])
@@ -1006,6 +1087,8 @@ class App:
                 tags = ("new",)
             elif tab in ("waiting", "blacklist"):
                 tags = ("flag",) if c.in_quiver else ("dim",) if not c.listed else ()
+            elif tab == "linked":
+                tags = () if c.linked_app else ("warn",)  # the app it was linked to has left Quiver
             rows.append((c.key, self._values(c), tags))
         self.tables[tab].fill(rows)
 
@@ -1047,7 +1130,7 @@ class App:
                              text="Change why…  W" if cur == "waiting" else "Wait…  W")
         self.btn_black.config(state=on(cur in ("missing", "other", "taken", "waiting", "blacklist")),
                               text="Change reason…" if cur == "blacklist" else "Blacklist…  Del")
-        self.btn_back.config(state=on(cur in ("waiting", "blacklist")))
+        self.btn_back.config(state=on(cur in ("waiting", "blacklist", "linked")))
         self.btn_quiver.config(state=on(bool(self.quiver_pages())))
 
     def open_repo(self) -> None:
@@ -1098,7 +1181,7 @@ class App:
     def delete_key(self) -> None:
         if self.current() in ("missing", "other", "taken"):
             self.blacklist_selected()
-        elif self.current() in ("waiting", "blacklist"):
+        elif self.current() in ("waiting", "blacklist", "linked"):
             self.undecide_selected()
 
     def _next_row_after(self, keys: list[str]) -> str | None:
@@ -1172,7 +1255,7 @@ class App:
                                  f"Blacklisted {self._describe(cands)}: {BLACKLIST_REASONS[reason]}")
 
     def undecide_selected(self) -> None:
-        if self.current() not in ("waiting", "blacklist"):
+        if self.current() not in ("waiting", "blacklist", "linked"):
             return
         cands = self.selected_candidates()
         if not cands:
@@ -1207,8 +1290,10 @@ class App:
         for r in ((link or {}).get("replacements") or [])[:6]:
             m.add_command(label=f"Open replacement: {r['url'].split('://', 1)[-1]} ({r['how']})",
                           command=lambda u=r["url"]: open_url(u))
-        if cur in ("missing", "other", "taken", "waiting", "blacklist"):
+        if cur in ("missing", "other", "taken", "waiting", "blacklist", "linked"):
             m.add_separator()
+            self._link_menu(m, cur)
+        if cur in ("missing", "other", "taken", "waiting", "blacklist"):
             if cur in ("missing", "other", "taken", "blacklist"):
                 wait = tk.Menu(m, tearoff=False)
                 for rid, label in WAIT_REASONS.items():
@@ -1235,6 +1320,52 @@ class App:
                 for q in [q for q in cands[0].same_game if q not in cands[0].same_app][:6]:
                     m.add_command(label=f"Quiver has the same game: {q.title}", command=lambda u=q.page or q.url: open_url(u))
         m.tk_popup(event.x_root, event.y_root)
+
+    def _link_menu(self, m: tk.Menu, cur: str) -> None:
+        """Mark as in Quiver: as the app App in Quiver suggests, an app for the same game, or any app."""
+        cands = self.selected_candidates()
+        if not cands:
+            return
+        sub = tk.Menu(m, tearoff=False)
+        suggested = []
+        for c in cands[:1]:
+            suggested = list(c.same_app) + [q for q in c.same_game if q not in c.same_app]
+        for q in suggested[:10]:
+            why = "same name and creator" if q in cands[0].same_app else "same game"
+            sub.add_command(label=f"as {q.title}  ({why})", command=lambda q=q: self._mark_in_quiver(cands, q))
+        if suggested:
+            sub.add_separator()
+        sub.add_command(label="as another Quiver app…  L", command=self.link_selected)
+        theme.style_menu(sub, self.c)
+        m.add_cascade(label="Link to another Quiver app" if cur == "linked" else "Mark as in Quiver", menu=sub)
+
+    def link_selected(self) -> None:
+        """Pick the Quiver app the selected projects are, from a searchable list."""
+        if self.current() not in ("missing", "other", "taken", "waiting", "blacklist", "linked"):
+            return
+        cands = self.selected_candidates()
+        if not cands or not self.result:
+            return
+        first = cands[0]
+        suggested = first.same_app or first.same_game
+        if suggested:
+            start = suggested[0].title
+        else:
+            # Its own name, else its game's (without "(Switch 2)" and the like), else everything.
+            def finds(text: str) -> bool:
+                words = text.lower().split()
+                return bool(words) and any(all(any(w in f.lower() for f in (q.title, q.game, q.slug, q.url))
+                                               for w in words) for q in self.result.quiver)
+            start = next((t for t in (re.sub(r"\(.*?\)", "", first.title).strip(),
+                                      re.sub(r"\(.*?\)", "", first.game).strip()) if finds(t)), "")
+        dlg = QuiverAppPicker(self, f"Mark {self._describe(cands)} as in Quiver, as:", self.result.quiver, start,
+                              (first.same_app or first.same_game or [None])[0])
+        if dlg.result:
+            self._mark_in_quiver(cands, dlg.result[0], dlg.result[1])
+
+    def _mark_in_quiver(self, cands: list[Candidate], app: Item, note: str = "") -> None:
+        engine.link_to_quiver(self.store, cands, app, note=note)
+        self._after_decision([c.key for c in cands], f"Marked {self._describe(cands)} as in Quiver, as {app.title}")
 
     def check_quiver_live(self, slugs: list[str] | None = None) -> None:
         """Ask Quiver's live catalog about the apps in Down in Quiver (or the selected ones): archived ones and ones
@@ -1416,7 +1547,7 @@ class App:
         if not c.listed:
             self._line("Listed on")
             d.insert("end", "no listing site has it any more", "label")
-        if c.in_quiver:
+        if c.in_quiver and (c.decision or {}).get("list") != LINKED:  # a linked one says so below
             self._line("In Quiver as")
             for q in c.in_quiver:
                 self._link(q.title, q.page or q.url)
@@ -1437,6 +1568,16 @@ class App:
         self._link_line(c.link)
         dec = c.decision
         if dec:
+            if dec.get("list") == LINKED:
+                self._line("Marked as in Quiver as")
+                if c.linked_app:
+                    self._link(c.linked_app.title, c.linked_app.page or c.linked_app.url)
+                    d.insert("end", f" ({c.linked_app.url.split('://', 1)[-1]})", "label")
+                else:
+                    d.insert("end", f"{dec.get('quiver_title') or dec.get('quiver')}, which isn't in Quiver now", "warn")
+                d.insert("end", "   " + " · ".join(x for x in (dec.get("note", ""), f"since {dec.get('date', '')}",
+                                                            f"by {dec['by']}" if dec.get("by") else "") if x), "label")
+                return
             self._line("Waiting for" if dec.get("list") == WAITING else "Blacklisted")
             what = reason_label(dec)
             d.insert("end", " · ".join(x for x in (what, dec.get("note", ""), f"since {dec.get('date', '')}",
