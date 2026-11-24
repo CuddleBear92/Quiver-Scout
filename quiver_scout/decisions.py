@@ -15,6 +15,10 @@ from pathlib import Path
 
 WAITING = "waiting"
 BLACKLIST = "blacklist"
+# Marked as in Quiver by hand: Quiver has it as another app no rule can tell (a launcher for the game's code, say).
+# The entry's "quiver" is that app's slug, "quiver_title" its name then.
+LINKED = "linked"
+LISTS = (WAITING, BLACKLIST, LINKED)
 
 # Why a project is waiting, in the order the window offers them.
 WAIT_REASONS = {
@@ -105,8 +109,9 @@ class Decisions:
     def of(self, which: str) -> dict[str, dict]:
         return {k: v for k, v in self.entries.items() if v.get("list") == which}
 
-    def set(self, which: str, projects: list[dict], reason: str = "", note: str = "", by: str = "") -> None:
-        """projects: dicts with key, title, game, url."""
+    def set(self, which: str, projects: list[dict], reason: str = "", note: str = "", by: str = "",
+            extra: dict | None = None) -> None:
+        """projects: dicts with key, title, game, url. `extra` goes on every entry (a linked app's slug)."""
         self._mtime = None
         self.reload()
         today = datetime.now().strftime("%Y-%m-%d")
@@ -119,6 +124,7 @@ class Decisions:
                 entry["reason"] = reason
             if by:
                 entry["by"] = by
+            entry.update(extra or {})
             self.entries[p["key"]] = entry
         self._write()
 
@@ -129,7 +135,7 @@ class Decisions:
         self.reload()
         counts = {"added": 0, "updated": 0, "kept": 0}
         for key, theirs in incoming.items():
-            if not isinstance(theirs, dict) or theirs.get("list") not in (WAITING, BLACKLIST):
+            if not isinstance(theirs, dict) or theirs.get("list") not in LISTS:
                 continue
             mine = self.entries.get(key)
             if not mine:
